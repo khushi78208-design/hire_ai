@@ -55,6 +55,8 @@ class ApplyService {
     required String phone,
     required String qualification,
     required int experienceYears,
+    required String currentCity,
+    required bool willingToRelocate,
     required String resumePath,
     required String resumeFilename,
     String? coverNote,
@@ -68,6 +70,8 @@ class ApplyService {
           'phone': phone,
           'qualification': qualification,
           'experience_years': experienceYears,
+          'current_city': currentCity,
+          'willing_to_relocate': willingToRelocate,
           'resume_path': resumePath,
           'resume_filename': resumeFilename,
           if (coverNote != null && coverNote.isNotEmpty)

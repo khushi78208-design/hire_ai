@@ -147,6 +147,8 @@ const applySchema = z.object({
     phone: z.string().min(10, "Enter a valid mobile number"),
     qualification: z.string().min(2, "Enter your qualification"),
     experience_years: z.coerce.number().int().min(0),
+    current_city: z.string().min(2, "Enter your current city"),
+    willing_to_relocate: z.boolean().default(false),
     resume_path: z.string().min(1, "Resume is required"),
     resume_filename: z.string().optional(),
     cover_note: z.string().optional(),

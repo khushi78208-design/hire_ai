@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isHr = _role == 'hr';
 
     final pages = isHr
-        ? [const JobsListScreen(isHr: true), const ApplicantsScreen()]
+        ? [const JobsListScreen(isHr: true), ApplicantsScreen()]
         : [const JobsListScreen(isHr: false), const _MyApplicationsTab()];
 
     final titles = isHr

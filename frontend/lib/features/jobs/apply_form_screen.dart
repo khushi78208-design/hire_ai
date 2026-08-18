@@ -22,8 +22,10 @@ class _ApplyFormScreenState extends State<ApplyFormScreen> {
   final _phoneCtrl = TextEditingController();
   final _qualCtrl = TextEditingController();
   final _expCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
 
+  bool _willingToRelocate = false;
   UploadedResume? _resume;
   bool _uploading = false;
   bool _submitting = false;
@@ -38,6 +40,7 @@ class _ApplyFormScreenState extends State<ApplyFormScreen> {
       _phoneCtrl,
       _qualCtrl,
       _expCtrl,
+      _cityCtrl,
       _noteCtrl,
     ]) {
       c.dispose();
@@ -83,6 +86,8 @@ class _ApplyFormScreenState extends State<ApplyFormScreen> {
       phone: _phoneCtrl.text.trim(),
       qualification: _qualCtrl.text.trim(),
       experienceYears: int.tryParse(_expCtrl.text.trim()) ?? 0,
+      currentCity: _cityCtrl.text.trim(),
+      willingToRelocate: _willingToRelocate,
       resumePath: _resume!.path,
       resumeFilename: _resume!.filename,
       coverNote: _noteCtrl.text.trim(),
@@ -194,13 +199,41 @@ class _ApplyFormScreenState extends State<ApplyFormScreen> {
                 border: OutlineInputBorder(),
               ),
               validator: (v) {
-                if (v == null || v.trim().isEmpty)
+                if (v == null || v.trim().isEmpty) {
                   return 'Enter your experience';
+                }
                 if (int.tryParse(v.trim()) == null) return 'Enter a number';
                 return null;
               },
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            TextFormField(
+              controller: _cityCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Current city *',
+                hintText: 'Mumbai',
+                prefixIcon: Icon(Icons.location_city_outlined),
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) => (v == null || v.trim().length < 2)
+                  ? 'Enter your current city'
+                  : null,
+            ),
+            const SizedBox(height: 8),
+
+            // Recruiters filter on this constantly, and it is the one thing
+            // a resume almost never says.
+            CheckboxListTile(
+              value: _willingToRelocate,
+              onChanged: (v) => setState(() => _willingToRelocate = v ?? false),
+              title: const Text('I am willing to relocate'),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+            const SizedBox(height: 16),
 
             Text('Resume *', style: theme.textTheme.labelLarge),
             const SizedBox(height: 8),
