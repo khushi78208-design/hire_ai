@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
+import '../../core/theme/app_theme.dart';
 import 'job_service.dart';
 import 'evaluation_model.dart';
 
 class ApplicantsScreen extends StatefulWidget {
-  const ApplicantsScreen({super.key});
+  /// Set when the recruiter arrives from the dashboard, so the list opens
+  /// already narrowed to what they tapped.
+  final String? initialJobId;
+  final String? initialStatus;
+
+  const ApplicantsScreen({super.key, this.initialJobId, this.initialStatus});
 
   @override
   State<ApplicantsScreen> createState() => _ApplicantsScreenState();
@@ -23,20 +29,34 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   bool _loadingJobs = true;
   bool _loadingApplicants = false;
 
+  String? _statusFilter;
+  int _minScore = 0;
+
   @override
   void initState() {
     super.initState();
+    _statusFilter = widget.initialStatus;
     _loadJobs();
   }
 
   Future<void> _loadJobs() async {
     final jobs = await JobService.list(mine: true);
     if (!mounted) return;
+
+    Job? initial;
+    if (widget.initialJobId != null) {
+      // firstWhere would throw if the job was deleted between screens.
+      for (final j in jobs) {
+        if (j.id == widget.initialJobId) initial = j;
+      }
+    }
+
     setState(() {
       _jobs = jobs;
       _loadingJobs = false;
-      if (jobs.isNotEmpty) _selected = jobs.first;
+      _selected = initial ?? (jobs.isNotEmpty ? jobs.first : null);
     });
+
     if (_selected != null) _loadApplicants();
   }
 
@@ -105,14 +125,88 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
           SnackBar(content: Text(msg is String ? msg : 'Analysis failed')),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
+        // Surface the server's own reason — the usual cause is a missing
+        // resume, which the recruiter can actually act on.
+        final msg = e is DioException
+            ? e.response?.data?['error']?['message']
+            : null;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Analysis failed. Try again.')),
+          SnackBar(
+            content: Text(msg is String ? msg : 'Analysis failed. Try again.'),
+          ),
         );
       }
     } finally {
       if (mounted) setState(() => _analysing.remove(applicationId));
+    }
+  }
+
+  Future<void> _setStatus(String applicationId, String status) async {
+    String? note;
+
+    // A rejection without a reason helps nobody later — but forcing one
+    // slows the recruiter down, so it stays optional.
+    if (status == 'rejected') {
+      note = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          final ctrl = TextEditingController();
+          return AlertDialog(
+            title: const Text('Reject this candidate?'),
+            content: TextField(
+              controller: ctrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional, internal)',
+                hintText: 'Looking for more hands-on experience',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(ctx).colorScheme.error,
+                ),
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Reject'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (note == null) return; // cancelled
+    }
+
+    try {
+      final res = await _dio.patch(
+        '/applications/$applicationId/status',
+        data: {
+          'status': status,
+          if (note != null && note.isNotEmpty) 'status_note': note,
+        },
+      );
+
+      if (res.data?['success'] == true && mounted) {
+        setState(() {
+          final i = _applicants.indexWhere((a) => a['id'] == applicationId);
+          if (i != -1) _applicants[i] = {..._applicants[i], 'status': status};
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Marked as ${status.replaceAll("_", " ")}')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update status')),
+        );
+      }
     }
   }
 
@@ -160,13 +254,17 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(
+            Space.lg,
+            Space.md,
+            Space.lg,
+            Space.sm,
+          ),
           child: DropdownButtonFormField<String>(
             initialValue: _selected?.id,
             isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Vacancy',
-              border: OutlineInputBorder(),
               isDense: true,
             ),
             items: _jobs
@@ -186,6 +284,43 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
             },
           ),
         ),
+
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+            children: [
+              _FilterChip(
+                label: 'All',
+                selected: _statusFilter == null,
+                onTap: () => setState(() => _statusFilter = null),
+              ),
+              for (final s in const [
+                'applied',
+                'shortlisted',
+                'on_hold',
+                'interview',
+                'selected',
+                'rejected',
+              ])
+                _FilterChip(
+                  label: StatusColors.label(s),
+                  color: StatusColors.of(s),
+                  selected: _statusFilter == s,
+                  onTap: () => setState(
+                    () => _statusFilter = _statusFilter == s ? null : s,
+                  ),
+                ),
+              _FilterChip(
+                label: 'Score 70+',
+                selected: _minScore > 0,
+                onTap: () => setState(() => _minScore = _minScore > 0 ? 0 : 70),
+              ),
+            ],
+          ),
+        ),
+
         Expanded(child: _buildList()),
       ],
     );
@@ -196,18 +331,37 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_applicants.isEmpty) {
-      return const _Empty(
+    var list = [..._applicants];
+
+    if (_statusFilter != null) {
+      list = list
+          .where((a) => (a['status'] ?? 'applied') == _statusFilter)
+          .toList();
+    }
+
+    if (_minScore > 0) {
+      list = list
+          .where(
+            (a) => (_evaluations[a['id']]?.overallScore ?? -1) >= _minScore,
+          )
+          .toList();
+    }
+
+    if (list.isEmpty) {
+      return _Empty(
         icon: Icons.people_outline,
-        title: 'No applications yet',
-        message: 'Candidates who apply to this vacancy will appear here.',
+        title: _applicants.isEmpty
+            ? 'No applications yet'
+            : 'Nothing matches these filters',
+        message: _applicants.isEmpty
+            ? 'Candidates who apply to this vacancy will appear here.'
+            : 'Clear a filter to see more candidates.',
       );
     }
 
     // Highest score first; unscored applications sink to the bottom so the
     // recruiter always sees the ranked ones without scrolling.
-    final sorted = [..._applicants];
-    sorted.sort((a, b) {
+    list.sort((a, b) {
       final sa = _evaluations[a['id']]?.overallScore ?? -1;
       final sb = _evaluations[b['id']]?.overallScore ?? -1;
       return sb.compareTo(sa);
@@ -216,10 +370,15 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
     return RefreshIndicator(
       onRefresh: _loadApplicants,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-        itemCount: sorted.length,
+        padding: const EdgeInsets.fromLTRB(
+          Space.lg,
+          Space.xs,
+          Space.lg,
+          Space.xl,
+        ),
+        itemCount: list.length,
         itemBuilder: (context, i) {
-          final app = sorted[i];
+          final app = list[i];
           final id = app['id'] as String;
           return _ApplicantCard(
             app: app,
@@ -227,8 +386,56 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
             analysing: _analysing.contains(id),
             onOpenResume: _openResume,
             onAnalyse: () => _analyse(id),
+            onSetStatus: (status) => _setStatus(id, status),
           );
         },
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final Color? color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = color ?? theme.colorScheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: Space.sm),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Space.md + 2,
+            vertical: Space.sm,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? c.withValues(alpha: 0.14) : null,
+            border: Border.all(color: selected ? c : theme.dividerColor),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: selected ? c : theme.colorScheme.onSurfaceVariant,
+              fontWeight: selected ? FontWeight.w600 : null,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -240,6 +447,7 @@ class _ApplicantCard extends StatefulWidget {
   final bool analysing;
   final void Function(String path) onOpenResume;
   final VoidCallback onAnalyse;
+  final void Function(String status) onSetStatus;
 
   const _ApplicantCard({
     required this.app,
@@ -247,6 +455,7 @@ class _ApplicantCard extends StatefulWidget {
     required this.analysing,
     required this.onOpenResume,
     required this.onAnalyse,
+    required this.onSetStatus,
   });
 
   @override
@@ -280,6 +489,7 @@ class _ApplicantCardState extends State<_ApplicantCard> {
     final resumePath = app['resume_path'] as String?;
     final resumeName = app['resume_filename'] ?? 'Resume';
     final note = app['cover_note'] as String?;
+    final status = (app['status'] ?? 'applied').toString();
     final initials = name.toString().trim().isEmpty
         ? '?'
         : name.toString().trim()[0].toUpperCase();
@@ -355,7 +565,10 @@ class _ApplicantCardState extends State<_ApplicantCard> {
               ],
             ),
 
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
+            _StatusBadge(status: status),
+
+            const SizedBox(height: 12),
             _Row(icon: Icons.mail_outline, text: email.toString()),
             if (phone.toString().isNotEmpty) ...[
               const SizedBox(height: 6),
@@ -497,7 +710,137 @@ class _ApplicantCardState extends State<_ApplicantCard> {
                   ),
               ],
             ),
+
+            const Divider(height: 24),
+
+            // The recruiter decides. Every option stays available at every
+            // stage so a decision can always be corrected.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _ActionChip(
+                  label: 'Shortlist',
+                  icon: Icons.check_circle_outline,
+                  color: Colors.green.shade700,
+                  selected: status == 'shortlisted',
+                  onTap: () => widget.onSetStatus('shortlisted'),
+                ),
+                _ActionChip(
+                  label: 'Hold',
+                  icon: Icons.pause_circle_outline,
+                  color: Colors.orange.shade800,
+                  selected: status == 'on_hold',
+                  onTap: () => widget.onSetStatus('on_hold'),
+                ),
+                _ActionChip(
+                  label: 'Interview',
+                  icon: Icons.event_outlined,
+                  color: Colors.blue.shade700,
+                  selected: status == 'interview',
+                  onTap: () => widget.onSetStatus('interview'),
+                ),
+                _ActionChip(
+                  label: 'Select',
+                  icon: Icons.star_outline,
+                  color: Colors.teal.shade700,
+                  selected: status == 'selected',
+                  onTap: () => widget.onSetStatus('selected'),
+                ),
+                _ActionChip(
+                  label: 'Reject',
+                  icon: Icons.cancel_outlined,
+                  color: theme.colorScheme.error,
+                  selected: status == 'rejected',
+                  onTap: () => widget.onSetStatus('rejected'),
+                ),
+              ],
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ActionChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.15) : null,
+          border: Border.all(
+            color: selected ? color : Theme.of(context).dividerColor,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: selected ? color : null),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: selected ? color : null,
+                fontWeight: selected ? FontWeight.w600 : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  const _StatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final (label, color) = switch (status) {
+      'shortlisted' => ('Shortlisted', Colors.green.shade700),
+      'on_hold' => ('On hold', Colors.orange.shade800),
+      'interview' => ('Interview', Colors.blue.shade700),
+      'selected' => ('Selected', Colors.teal.shade700),
+      'rejected' => ('Rejected', theme.colorScheme.error),
+      _ => ('Applied', theme.hintColor),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
         ),
       ),
     );

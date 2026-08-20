@@ -138,5 +138,104 @@ router.get(
         res.json({ success: true, data: { evaluations: data ?? [] } });
     })
 );
+// ------------------------------------------------------------
+// GET /api/v1/analysis/dashboard
+// One call powers the whole HR dashboard — counts, attention items
+// and the per-vacancy breakdown.
+// ------------------------------------------------------------
+router.get(
+    "/dashboard",
+    requireAuth,
+    requireRole("hr", "admin"),
+    asyncHandler(async (req, res) => {
+        const { data: jobs, error: jobsError } = await supabase
+            .from("jobs")
+            .select("id, title, status")
+            .eq("created_by", req.user.id);
 
+        if (jobsError) throw ApiError.internal(jobsError.message);
+
+        const jobIds = (jobs ?? []).map((j) => j.id);
+
+        if (jobIds.length === 0) {
+            return res.json({
+                success: true,
+                data: {
+                    totals: { applications: 0, applied: 0, shortlisted: 0, on_hold: 0, interview: 0, selected: 0, rejected: 0 },
+                    unanalysed: 0,
+                    stale: 0,
+                    jobs: [],
+                },
+            });
+        }
+
+        const { data: applications, error: appsError } = await supabase
+            .from("applications")
+            .select("id, job_id, status, status_updated_at, created_at")
+            .in("job_id", jobIds);
+
+        if (appsError) throw ApiError.internal(appsError.message);
+
+        const { data: evaluations } = await supabase
+            .from("ai_evaluations")
+            .select("application_id")
+            .in("job_id", jobIds);
+
+        const scored = new Set((evaluations ?? []).map((e) => e.application_id));
+
+        const empty = () => ({
+            applied: 0,
+            shortlisted: 0,
+            on_hold: 0,
+            interview: 0,
+            selected: 0,
+            rejected: 0,
+        });
+
+        const totals = { applications: 0, ...empty() };
+        const perJob = new Map(
+            (jobs ?? []).map((j) => [
+                j.id,
+                { id: j.id, title: j.title, status: j.status, total: 0, ...empty() },
+            ])
+        );
+
+        let unanalysed = 0;
+        let stale = 0;
+
+        // "Stale" means shortlisted and then left alone — the single most
+        // common way a good candidate quietly goes cold.
+        const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
+
+        for (const app of applications ?? []) {
+            const status = app.status ?? "applied";
+            const bucket = perJob.get(app.job_id);
+
+            totals.applications += 1;
+            if (status in totals) totals[status] += 1;
+
+            if (bucket) {
+                bucket.total += 1;
+                if (status in bucket) bucket[status] += 1;
+            }
+
+            if (!scored.has(app.id)) unanalysed += 1;
+
+            if (status === "shortlisted") {
+                const since = app.status_updated_at ?? app.created_at;
+                if (since && new Date(since).getTime() < fiveDaysAgo) stale += 1;
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                totals,
+                unanalysed,
+                stale,
+                jobs: [...perJob.values()].sort((a, b) => b.total - a.total),
+            },
+        });
+    })
+);
 export default router;
