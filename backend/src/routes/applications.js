@@ -32,6 +32,40 @@ router.get(
     })
 );
 
+// ------------------------------------------------------------
+// GET /api/v1/applications/all
+// Every application across this recruiter's postings, for the
+// "All vacancies" view.
+// ------------------------------------------------------------
+router.get(
+    "/all",
+    requireAuth,
+    requireRole("hr", "admin"),
+    asyncHandler(async (req, res) => {
+        const { data: jobs } = await supabase
+            .from("jobs")
+            .select("id, title")
+            .eq("created_by", req.user.id);
+
+        const jobIds = (jobs ?? []).map((j) => j.id);
+        if (jobIds.length === 0) {
+            return res.json({ success: true, data: { applications: [] } });
+        }
+
+        const { data, error } = await supabase
+            .from("applications")
+            .select(
+                "*, users:candidate_id (id, full_name, email), jobs:job_id (id, title)"
+            )
+            .in("job_id", jobIds)
+            .order("created_at", { ascending: false });
+
+        if (error) throw ApiError.internal(error.message);
+
+        res.json({ success: true, data: { applications: data ?? [] } });
+    })
+);
+
 const statusSchema = z.object({
     status: z.enum([
         "applied",

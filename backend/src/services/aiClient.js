@@ -63,4 +63,10 @@ export const aiClient = {
       // LLM calls are slow; the default 30s is not enough headroom.
       timeoutMs: 90000,
     }),
+
+  draftJob: (message) =>
+    call("/agent/draft-job", { body: { message }, timeoutMs: 60000 }),
+
+  agentAnswer: (message, context) =>
+    call("/agent/answer", { body: { message, context }, timeoutMs: 60000 }),
 };

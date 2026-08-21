@@ -32,6 +32,10 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   String? _statusFilter;
   int _minScore = 0;
 
+  /// No vacancy selected means "all of them" — the dashboard drills down by
+  /// status across every posting, not one at a time.
+  bool _allJobs = false;
+
   @override
   void initState() {
     super.initState();
@@ -51,23 +55,33 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
       }
     }
 
+    // Arriving from a status card with no job means the recruiter wants
+    // that status across every vacancy.
+    final showAll = widget.initialJobId == null && widget.initialStatus != null;
+
     setState(() {
       _jobs = jobs;
       _loadingJobs = false;
-      _selected = initial ?? (jobs.isNotEmpty ? jobs.first : null);
+      _allJobs = showAll;
+      _selected = showAll
+          ? null
+          : (initial ?? (jobs.isNotEmpty ? jobs.first : null));
     });
 
-    if (_selected != null) _loadApplicants();
+    _loadApplicants();
   }
 
   Future<void> _loadApplicants() async {
-    final job = _selected;
-    if (job == null) return;
+    if (!_allJobs && _selected == null) return;
 
     setState(() => _loadingApplicants = true);
 
+    final path = _allJobs
+        ? '/applications/all'
+        : '/jobs/${_selected!.id}/applications';
+
     try {
-      final res = await _dio.get('/jobs/${job.id}/applications');
+      final res = await _dio.get(path);
       if (!mounted) return;
       setState(() {
         _applicants = res.data?['success'] == true
@@ -87,11 +101,12 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   }
 
   Future<void> _loadEvaluations() async {
-    final job = _selected;
-    if (job == null) return;
+    if (!_allJobs && _selected == null) return;
+
+    final path = _allJobs ? '/analysis/all' : '/analysis/jobs/${_selected!.id}';
 
     try {
-      final res = await _dio.get('/analysis/jobs/${job.id}');
+      final res = await _dio.get(path);
       if (res.data?['success'] != true || !mounted) return;
 
       final list = res.data['data']['evaluations'] as List;
@@ -261,23 +276,30 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
             Space.sm,
           ),
           child: DropdownButtonFormField<String>(
-            initialValue: _selected?.id,
+            initialValue: _allJobs ? '__all__' : _selected?.id,
             isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Vacancy',
               isDense: true,
             ),
-            items: _jobs
-                .map(
-                  (j) => DropdownMenuItem(
-                    value: j.id,
-                    child: Text(j.title, overflow: TextOverflow.ellipsis),
-                  ),
-                )
-                .toList(),
+            items: [
+              const DropdownMenuItem(
+                value: '__all__',
+                child: Text('All vacancies'),
+              ),
+              ..._jobs.map(
+                (j) => DropdownMenuItem(
+                  value: j.id,
+                  child: Text(j.title, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ],
             onChanged: (id) {
               setState(() {
-                _selected = _jobs.firstWhere((j) => j.id == id);
+                _allJobs = id == '__all__';
+                _selected = _allJobs
+                    ? null
+                    : _jobs.firstWhere((j) => j.id == id);
                 _evaluations = {};
               });
               _loadApplicants();
@@ -384,6 +406,9 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
             app: app,
             evaluation: _evaluations[id],
             analysing: _analysing.contains(id),
+            // Which vacancy an applicant belongs to is only ambiguous when
+            // several are on screen at once.
+            showJobTitle: _allJobs,
             onOpenResume: _openResume,
             onAnalyse: () => _analyse(id),
             onSetStatus: (status) => _setStatus(id, status),
@@ -445,6 +470,7 @@ class _ApplicantCard extends StatefulWidget {
   final Map<String, dynamic> app;
   final Evaluation? evaluation;
   final bool analysing;
+  final bool showJobTitle;
   final void Function(String path) onOpenResume;
   final VoidCallback onAnalyse;
   final void Function(String status) onSetStatus;
@@ -453,6 +479,7 @@ class _ApplicantCard extends StatefulWidget {
     required this.app,
     required this.evaluation,
     required this.analysing,
+    required this.showJobTitle,
     required this.onOpenResume,
     required this.onAnalyse,
     required this.onSetStatus,
@@ -465,12 +492,6 @@ class _ApplicantCard extends StatefulWidget {
 class _ApplicantCardState extends State<_ApplicantCard> {
   bool _expanded = false;
 
-  Color _scoreColor(int score, ThemeData theme) {
-    if (score >= 80) return Colors.green.shade700;
-    if (score >= 50) return Colors.orange.shade800;
-    return theme.colorScheme.error;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -480,6 +501,7 @@ class _ApplicantCardState extends State<_ApplicantCard> {
     // Prefer what the candidate typed into the application form over the
     // account name — the form is what they intended for this employer.
     final account = app['users'] as Map<String, dynamic>?;
+    final job = app['jobs'] as Map<String, dynamic>?;
     final name = app['full_name'] ?? account?['full_name'] ?? 'Candidate';
     final email = app['email'] ?? account?['email'] ?? '';
     final phone = app['phone'] ?? '';
@@ -494,269 +516,279 @@ class _ApplicantCardState extends State<_ApplicantCard> {
         ? '?'
         : name.toString().trim()[0].toUpperCase();
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.dividerColor),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Text(
-                    initials,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(Space.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.showJobTitle && job?['title'] != null) ...[
+                Text(
+                  job!['title'].toString().toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                    color: theme.colorScheme.primary,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
+                const SizedBox(height: Space.sm),
+              ],
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: theme.colorScheme.primaryContainer,
+                    child: Text(
+                      initials,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name.toString(),
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        if (qual.toString().isNotEmpty)
+                          Text(
+                            '${qual.toString()} · ${exp ?? 0} yrs',
+                            style: TextStyle(
+                              color: theme.hintColor,
+                              fontSize: 13,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (eval != null)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${eval.overallScore}',
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w600,
+                            height: 1,
+                            color: ScoreColors.of(eval.overallScore),
+                          ),
+                        ),
+                        Text(
+                          eval.label,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: theme.hintColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: Space.md),
+              _StatusBadge(status: status),
+
+              const SizedBox(height: Space.md),
+              _Row(icon: Icons.mail_outline, text: email.toString()),
+              if (phone.toString().isNotEmpty) ...[
+                const SizedBox(height: Space.xs + 2),
+                _Row(icon: Icons.phone_outlined, text: phone.toString()),
+              ],
+              if (city.toString().isNotEmpty) ...[
+                const SizedBox(height: Space.xs + 2),
+                _Row(icon: Icons.location_city_outlined, text: city.toString()),
+              ],
+
+              // The one line that turns a number into a decision the
+              // recruiter can actually act on.
+              if (eval != null && eval.summary.isNotEmpty) ...[
+                const SizedBox(height: Space.md),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(Space.md),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    borderRadius: BorderRadius.circular(AppRadius.control),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        name.toString(),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
-                      if (qual.toString().isNotEmpty)
-                        Text(
-                          '${qual.toString()} · ${exp ?? 0} yrs',
-                          style: TextStyle(
-                            color: theme.hintColor,
-                            fontSize: 13,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (eval != null)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '${eval.overallScore}',
+                        'Why this score',
                         style: TextStyle(
-                          fontSize: 26,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          height: 1,
-                          color: _scoreColor(eval.overallScore, theme),
+                          color: theme.hintColor,
                         ),
                       ),
+                      const SizedBox(height: Space.xs),
                       Text(
-                        eval.label,
-                        style: TextStyle(fontSize: 11, color: theme.hintColor),
+                        eval.summary,
+                        style: const TextStyle(fontSize: 13, height: 1.5),
                       ),
                     ],
                   ),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-            _StatusBadge(status: status),
-
-            const SizedBox(height: 12),
-            _Row(icon: Icons.mail_outline, text: email.toString()),
-            if (phone.toString().isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _Row(icon: Icons.phone_outlined, text: phone.toString()),
-            ],
-            if (city.toString().isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _Row(icon: Icons.location_city_outlined, text: city.toString()),
-            ],
-
-            // The one line that turns a number into a decision the recruiter
-            // can actually act on.
-            if (eval != null && eval.summary.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.5,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Why this score',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: theme.hintColor,
+              ],
+
+              if (eval != null && _expanded) ...[
+                const SizedBox(height: Space.lg),
+                _Bars(eval: eval),
+                const SizedBox(height: Space.lg),
+                if (eval.matchedSkills.isNotEmpty)
+                  _SkillGroup(
+                    title: 'Matched',
+                    skills: eval.matchedSkills,
+                    color: StatusColors.shortlisted,
+                  ),
+                if (eval.missingSkills.isNotEmpty) ...[
+                  const SizedBox(height: Space.md),
+                  _SkillGroup(
+                    title: 'Missing',
+                    skills: eval.missingSkills,
+                    color: theme.colorScheme.error,
+                  ),
+                ],
+                if (eval.strengths.isNotEmpty) ...[
+                  const SizedBox(height: Space.md),
+                  _Points(title: 'Strengths', items: eval.strengths),
+                ],
+                if (eval.concerns.isNotEmpty) ...[
+                  const SizedBox(height: Space.md),
+                  _Points(title: 'Concerns', items: eval.concerns),
+                ],
+                if (eval.locationNote.isNotEmpty) ...[
+                  const SizedBox(height: Space.md),
+                  _Row(icon: Icons.place_outlined, text: eval.locationNote),
+                ],
+                const SizedBox(height: Space.md),
+                Text(
+                  'AI screening is a recommendation. The hiring decision is yours.',
+                  style: TextStyle(fontSize: 11, color: theme.hintColor),
+                ),
+              ],
+
+              if (note != null && note.isNotEmpty && _expanded) ...[
+                const SizedBox(height: Space.md),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(Space.md),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: theme.dividerColor),
+                    borderRadius: BorderRadius.circular(AppRadius.control),
+                  ),
+                  child: Text(
+                    note,
+                    style: const TextStyle(fontSize: 13, height: 1.5),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: Space.md),
+              Wrap(
+                spacing: Space.sm,
+                runSpacing: Space.sm,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (resumePath != null)
+                    OutlinedButton.icon(
+                      onPressed: () => widget.onOpenResume(resumePath),
+                      icon: const Icon(Icons.open_in_new, size: 17),
+                      label: Text(
+                        resumeName.toString(),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      eval.summary,
-                      style: const TextStyle(fontSize: 13, height: 1.5),
+                  if (widget.analysing)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: Space.md),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: Space.sm),
+                          Text('Analysing…', style: TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                    )
+                  else
+                    FilledButton.tonalIcon(
+                      onPressed: widget.onAnalyse,
+                      icon: const Icon(Icons.auto_awesome, size: 17),
+                      label: Text(eval == null ? 'Analyse' : 'Re-analyse'),
                     ),
-                  ],
-                ),
+                  if (eval != null)
+                    TextButton(
+                      onPressed: () => setState(() => _expanded = !_expanded),
+                      child: Text(_expanded ? 'Less' : 'Details'),
+                    ),
+                ],
+              ),
+
+              const Divider(),
+
+              // The recruiter decides. Every option stays available at every
+              // stage so a decision can always be corrected.
+              Wrap(
+                spacing: Space.sm,
+                runSpacing: Space.sm,
+                children: [
+                  _ActionChip(
+                    label: 'Shortlist',
+                    icon: Icons.check_circle_outline,
+                    color: StatusColors.shortlisted,
+                    selected: status == 'shortlisted',
+                    onTap: () => widget.onSetStatus('shortlisted'),
+                  ),
+                  _ActionChip(
+                    label: 'Hold',
+                    icon: Icons.pause_circle_outline,
+                    color: StatusColors.onHold,
+                    selected: status == 'on_hold',
+                    onTap: () => widget.onSetStatus('on_hold'),
+                  ),
+                  _ActionChip(
+                    label: 'Interview',
+                    icon: Icons.event_outlined,
+                    color: StatusColors.interview,
+                    selected: status == 'interview',
+                    onTap: () => widget.onSetStatus('interview'),
+                  ),
+                  _ActionChip(
+                    label: 'Select',
+                    icon: Icons.star_outline,
+                    color: StatusColors.selected,
+                    selected: status == 'selected',
+                    onTap: () => widget.onSetStatus('selected'),
+                  ),
+                  _ActionChip(
+                    label: 'Reject',
+                    icon: Icons.cancel_outlined,
+                    color: StatusColors.rejected,
+                    selected: status == 'rejected',
+                    onTap: () => widget.onSetStatus('rejected'),
+                  ),
+                ],
               ),
             ],
-
-            if (eval != null && _expanded) ...[
-              const SizedBox(height: 16),
-              _Bars(eval: eval),
-              const SizedBox(height: 16),
-              if (eval.matchedSkills.isNotEmpty)
-                _SkillGroup(
-                  title: 'Matched',
-                  skills: eval.matchedSkills,
-                  color: Colors.green.shade700,
-                ),
-              if (eval.missingSkills.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _SkillGroup(
-                  title: 'Missing',
-                  skills: eval.missingSkills,
-                  color: theme.colorScheme.error,
-                ),
-              ],
-              if (eval.strengths.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                _Points(title: 'Strengths', items: eval.strengths),
-              ],
-              if (eval.concerns.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _Points(title: 'Concerns', items: eval.concerns),
-              ],
-              if (eval.locationNote.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _Row(icon: Icons.place_outlined, text: eval.locationNote),
-              ],
-              const SizedBox(height: 12),
-              Text(
-                'AI screening is a recommendation. The hiring decision is yours.',
-                style: TextStyle(fontSize: 11, color: theme.hintColor),
-              ),
-            ],
-
-            if (note != null && note.isNotEmpty && _expanded) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  border: Border.all(color: theme.dividerColor),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  note,
-                  style: const TextStyle(fontSize: 13, height: 1.5),
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (resumePath != null)
-                  OutlinedButton.icon(
-                    onPressed: () => widget.onOpenResume(resumePath),
-                    icon: const Icon(Icons.open_in_new, size: 17),
-                    label: Text(
-                      resumeName.toString(),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                if (widget.analysing)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        SizedBox(width: 8),
-                        Text('Analysing…', style: TextStyle(fontSize: 13)),
-                      ],
-                    ),
-                  )
-                else
-                  FilledButton.tonalIcon(
-                    onPressed: widget.onAnalyse,
-                    icon: const Icon(Icons.auto_awesome, size: 17),
-                    label: Text(eval == null ? 'Analyse' : 'Re-analyse'),
-                  ),
-                if (eval != null)
-                  TextButton(
-                    onPressed: () => setState(() => _expanded = !_expanded),
-                    child: Text(_expanded ? 'Less' : 'Details'),
-                  ),
-              ],
-            ),
-
-            const Divider(height: 24),
-
-            // The recruiter decides. Every option stays available at every
-            // stage so a decision can always be corrected.
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _ActionChip(
-                  label: 'Shortlist',
-                  icon: Icons.check_circle_outline,
-                  color: Colors.green.shade700,
-                  selected: status == 'shortlisted',
-                  onTap: () => widget.onSetStatus('shortlisted'),
-                ),
-                _ActionChip(
-                  label: 'Hold',
-                  icon: Icons.pause_circle_outline,
-                  color: Colors.orange.shade800,
-                  selected: status == 'on_hold',
-                  onTap: () => widget.onSetStatus('on_hold'),
-                ),
-                _ActionChip(
-                  label: 'Interview',
-                  icon: Icons.event_outlined,
-                  color: Colors.blue.shade700,
-                  selected: status == 'interview',
-                  onTap: () => widget.onSetStatus('interview'),
-                ),
-                _ActionChip(
-                  label: 'Select',
-                  icon: Icons.star_outline,
-                  color: Colors.teal.shade700,
-                  selected: status == 'selected',
-                  onTap: () => widget.onSetStatus('selected'),
-                ),
-                _ActionChip(
-                  label: 'Reject',
-                  icon: Icons.cancel_outlined,
-                  color: theme.colorScheme.error,
-                  selected: status == 'rejected',
-                  onTap: () => widget.onSetStatus('rejected'),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -782,21 +814,24 @@ class _ActionChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.control),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.md,
+          vertical: Space.sm,
+        ),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.15) : null,
           border: Border.all(
             color: selected ? color : Theme.of(context).dividerColor,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 16, color: selected ? color : null),
-            const SizedBox(width: 6),
+            const SizedBox(width: Space.xs + 2),
             Text(
               label,
               style: TextStyle(
@@ -818,25 +853,19 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    final (label, color) = switch (status) {
-      'shortlisted' => ('Shortlisted', Colors.green.shade700),
-      'on_hold' => ('On hold', Colors.orange.shade800),
-      'interview' => ('Interview', Colors.blue.shade700),
-      'selected' => ('Selected', Colors.teal.shade700),
-      'rejected' => ('Rejected', theme.colorScheme.error),
-      _ => ('Applied', theme.hintColor),
-    };
+    final color = StatusColors.of(status);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.md,
+        vertical: Space.xs,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        label,
+        StatusColors.label(status),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -863,14 +892,10 @@ class _Bars extends StatelessWidget {
 
     return Column(
       children: items.map((e) {
-        final color = e.$2 >= 70
-            ? Colors.green.shade700
-            : e.$2 >= 45
-            ? Colors.orange.shade800
-            : theme.colorScheme.error;
+        final color = ScoreColors.of(e.$2);
 
         return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: Space.sm),
           child: Row(
             children: [
               SizedBox(
@@ -891,7 +916,7 @@ class _Bars extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: Space.sm),
               SizedBox(
                 width: 28,
                 child: Text(
@@ -932,10 +957,10 @@ class _SkillGroup extends StatelessWidget {
             color: Theme.of(context).hintColor,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: Space.xs + 2),
         Wrap(
-          spacing: 6,
-          runSpacing: 6,
+          spacing: Space.xs + 2,
+          runSpacing: Space.xs + 2,
           children: skills
               .map(
                 (s) => Container(
@@ -976,7 +1001,7 @@ class _Points extends StatelessWidget {
             color: Theme.of(context).hintColor,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: Space.xs),
         ...items.map(
           (t) => Padding(
             padding: const EdgeInsets.only(top: 3),
@@ -1009,7 +1034,7 @@ class _Row extends StatelessWidget {
     return Row(
       children: [
         Icon(icon, size: 15, color: Theme.of(context).hintColor),
-        const SizedBox(width: 6),
+        const SizedBox(width: Space.xs + 2),
         Expanded(
           child: Text(
             text,
@@ -1038,14 +1063,14 @@ class _Empty extends StatelessWidget {
     final theme = Theme.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(Space.xxl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, size: 56, color: theme.hintColor),
-            const SizedBox(height: 16),
+            const SizedBox(height: Space.lg),
             Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
+            const SizedBox(height: Space.xs + 2),
             Text(
               message,
               textAlign: TextAlign.center,

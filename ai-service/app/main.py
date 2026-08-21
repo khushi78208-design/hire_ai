@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from app.config import get_settings
-from app.routers import health, analysis
+from app.routers import health, analysis, agent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +29,7 @@ app = FastAPI(
 
 app.include_router(health.router)
 app.include_router(analysis.router)
+app.include_router(agent.router)
 
 
 @app.exception_handler(RequestValidationError)

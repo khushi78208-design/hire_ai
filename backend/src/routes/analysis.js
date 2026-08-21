@@ -109,6 +109,37 @@ router.post(
 );
 
 // ------------------------------------------------------------
+// GET /api/v1/analysis/all
+// Must sit above /jobs/:jobId — otherwise Express matches "all" as a
+// job id and this route never fires.
+// ------------------------------------------------------------
+router.get(
+    "/all",
+    requireAuth,
+    requireRole("hr", "admin"),
+    asyncHandler(async (req, res) => {
+        const { data: jobs } = await supabase
+            .from("jobs")
+            .select("id")
+            .eq("created_by", req.user.id);
+
+        const jobIds = (jobs ?? []).map((j) => j.id);
+        if (jobIds.length === 0) {
+            return res.json({ success: true, data: { evaluations: [] } });
+        }
+
+        const { data, error } = await supabase
+            .from("ai_evaluations")
+            .select("*")
+            .in("job_id", jobIds);
+
+        if (error) throw ApiError.internal(error.message);
+
+        res.json({ success: true, data: { evaluations: data ?? [] } });
+    })
+);
+
+// ------------------------------------------------------------
 // GET /api/v1/analysis/jobs/:jobId
 // Every stored evaluation for one job, for the applicants list.
 // ------------------------------------------------------------
@@ -138,6 +169,7 @@ router.get(
         res.json({ success: true, data: { evaluations: data ?? [] } });
     })
 );
+
 // ------------------------------------------------------------
 // GET /api/v1/analysis/dashboard
 // One call powers the whole HR dashboard — counts, attention items
@@ -238,4 +270,5 @@ router.get(
         });
     })
 );
+
 export default router;

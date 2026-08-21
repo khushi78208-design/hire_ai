@@ -7,6 +7,7 @@ import '../jobs/jobs_list_screen.dart';
 import '../jobs/job_service.dart';
 import '../jobs/applicants_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../agent/agent_chat.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,6 +25,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // candidates tab opens already filtered instead of showing everything.
   String? _pendingJobId;
   String? _pendingStatus;
+
+  // Bumping this rebuilds the vacancies tab after the assistant creates
+  // a draft, so the new job appears without a manual refresh.
+  int _jobsVersion = 0;
 
   @override
   void initState() {
@@ -68,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = isHr
         ? [
             DashboardScreen(onDrillDown: _drillDown),
-            const JobsListScreen(isHr: true),
+            JobsListScreen(key: ValueKey('jobs-$_jobsVersion'), isHr: true),
             ApplicantsScreen(
               initialJobId: _pendingJobId,
               initialStatus: _pendingStatus,
@@ -91,6 +96,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      floatingActionButton: isHr
+          ? FloatingActionButton(
+              onPressed: () => AgentChatSheet.show(
+                context,
+                onJobCreated: () => setState(() => _jobsVersion++),
+              ),
+              tooltip: 'Assistant',
+              child: const Icon(Icons.auto_awesome),
+            )
+          : null,
       body: pages[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
