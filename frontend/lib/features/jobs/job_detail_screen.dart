@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'job_service.dart';
 import 'create_job_screen.dart';
 import 'apply_form_screen.dart';
+import '../assessment/create_assessment_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
   final String jobId;
@@ -83,6 +84,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (updated == true) _load();
   }
 
+  void _sendAssessment() {
+    final job = _job;
+    if (job == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            CreateAssessmentScreen(jobId: job.id, jobTitle: job.title),
+      ),
+    );
+  }
+
   Future<void> _confirmDelete() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -146,6 +160,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 switch (value) {
                   case 'edit':
                     _edit();
+                  case 'assessment':
+                    _sendAssessment();
                   case 'publish':
                     _changeStatus('open', 'Vacancy published');
                   case 'close':
@@ -177,6 +193,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     ),
                   ),
                 if (job.isOpen) ...[
+                  // Sits above the divider because sending a test is routine
+                  // work; unpublishing and closing are not.
+                  const PopupMenuItem(
+                    value: 'assessment',
+                    child: ListTile(
+                      leading: Icon(Icons.quiz_outlined),
+                      title: Text('Send assessment'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   const PopupMenuItem(
                     value: 'draft',
                     child: ListTile(

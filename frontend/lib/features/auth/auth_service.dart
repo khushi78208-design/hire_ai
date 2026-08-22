@@ -53,13 +53,35 @@ class AuthService {
   }
 
   static Future<void> logout() async {
-    try {
-      final refresh = await TokenStorage.getRefreshToken();
-      await _dio.post('/auth/logout', data: {'refreshToken': refresh});
-    } catch (_) {
-      // Even if the server call fails, clear locally — the user asked to leave.
-    }
+    final refresh = await TokenStorage.getRefreshToken();
+    // Clear first — a failed network call must never leave the user
+    // half-logged-in.
     await TokenStorage.clear();
+    try {
+      await _dio.post('/auth/logout', data: {'refreshToken': refresh});
+    } catch (_) {}
+  }
+
+  /// Storage can go stale after a logout that half-failed. The server is
+  /// the only authority on who you actually are.
+  static Future<String?> currentRole() async {
+    try {
+      final res = await _dio.get('/auth/me');
+      if (res.data?['success'] == true) {
+        return res.data['data']['user']['role'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<String?> currentName() async {
+    try {
+      final res = await _dio.get('/auth/me');
+      if (res.data?['success'] == true) {
+        return res.data['data']['user']['full_name'] as String?;
+      }
+    } catch (_) {}
+    return null;
   }
 
   static Future<AuthResult> _handleAuthResponse(Response res) async {
@@ -78,10 +100,19 @@ class AuthService {
       return AuthResult(success: true, role: user['role']);
     }
 
-    // Backend sends every error in the same shape, so one path handles all.
-    final message = (body is Map && body['error'] is Map)
-        ? body['error']['message'] as String?
-        : null;
+    String? message;
+    if (body is Map && body['error'] is Map) {
+      final err = body['error'];
+      final details = err['details'];
+
+      // Validation errors carry the useful text in details[].message —
+      // err.message is just "Validation failed", which tells the user nothing.
+      if (details is List && details.isNotEmpty) {
+        message = details.map((d) => d['message']).join('\n');
+      } else {
+        message = err['message'] as String?;
+      }
+    }
 
     return AuthResult(
       success: false,
@@ -92,7 +123,7 @@ class AuthService {
   static String _networkError(DioException e) {
     if (e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.connectionError) {
-      return 'Cannot reach the server. Is the backend running?';
+      return 'Cannot reach the server. It may be waking up — try again.';
     }
     return 'Network error. Check your connection.';
   }

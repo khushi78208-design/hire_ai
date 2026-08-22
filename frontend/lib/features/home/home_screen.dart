@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import '../../core/storage/token_storage.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/app_drawer.dart';
 import '../../main.dart';
+import '../agent/agent_chat.dart';
+import '../assessment/assessment_service.dart';
+import '../assessment/take_test_screen.dart';
 import '../auth/auth_service.dart';
 import '../dashboard/dashboard_screen.dart';
-import '../jobs/jobs_list_screen.dart';
-import '../jobs/job_service.dart';
 import '../jobs/applicants_screen.dart';
-import '../../core/theme/app_theme.dart';
-import '../agent/agent_chat.dart';
+import '../jobs/create_job_screen.dart';
+import '../jobs/job_service.dart';
+import '../jobs/jobs_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,6 +22,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String? _role;
+  String? _name;
   bool _loading = true;
   int _index = 0;
 
@@ -26,9 +31,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _pendingJobId;
   String? _pendingStatus;
 
-  // Bumping this rebuilds the vacancies tab after the assistant creates
-  // a draft, so the new job appears without a manual refresh.
+  // Bumping these rebuilds a tab so it reflects what just happened
+  // elsewhere in the app.
   int _jobsVersion = 0;
+  int _dashboardVersion = 0;
 
   @override
   void initState() {
@@ -45,6 +51,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     // Repaint the whole app in this role's palette.
     HireAIApp.of(context)?.setRole(role);
+
+    // The drawer header needs a name; the token only carries the role.
+    final name = await AuthService.currentName();
+    if (mounted) setState(() => _name = name);
   }
 
   Future<void> _logout() async {
@@ -72,7 +82,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final pages = isHr
         ? [
-            DashboardScreen(onDrillDown: _drillDown),
+            DashboardScreen(
+              key: ValueKey('dash-$_dashboardVersion'),
+              onDrillDown: _drillDown,
+            ),
             JobsListScreen(key: ValueKey('jobs-$_jobsVersion'), isHr: true),
             ApplicantsScreen(
               initialJobId: _pendingJobId,
@@ -82,20 +95,78 @@ class _HomeScreenState extends State<HomeScreen> {
         : [const JobsListScreen(isHr: false), const _MyApplicationsTab()];
 
     final titles = isHr
-        ? ['Dashboard', 'My vacancies', 'Candidates']
+        ? ['Dashboard', 'Vacancies', 'Candidates']
         : ['Find jobs', 'My applications'];
 
     return Scaffold(
       appBar: AppBar(
         title: Text(titles[_index]),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: _logout,
+          // Lives here rather than as a second FAB — two floating buttons
+          // in one corner collide.
+          if (isHr && _index == 1)
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'New vacancy',
+              onPressed: () async {
+                final created = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CreateJobScreen()),
+                );
+                if (created == true) setState(() => _jobsVersion++);
+              },
+            ),
+        ],
+      ),
+      drawer: AppDrawer(
+        name: _name ?? 'You',
+        subtitle: isHr ? 'Recruiter' : 'Candidate',
+        role: _role ?? '',
+        selectedIndex: _index,
+        onSelect: (i) => setState(() {
+          _index = i;
+          if (i == 0 && isHr) _dashboardVersion++;
+          if (i != 2) {
+            _pendingJobId = null;
+            _pendingStatus = null;
+          }
+        }),
+        items: isHr
+            ? const [
+                DrawerItem(
+                  icon: Icons.dashboard_outlined,
+                  label: 'Dashboard',
+                  index: 0,
+                ),
+                DrawerItem(
+                  icon: Icons.work_outline,
+                  label: 'Vacancies',
+                  index: 1,
+                ),
+                DrawerItem(
+                  icon: Icons.people_outline,
+                  label: 'Candidates',
+                  index: 2,
+                ),
+              ]
+            : const [
+                DrawerItem(icon: Icons.search, label: 'Find jobs', index: 0),
+                DrawerItem(
+                  icon: Icons.description_outlined,
+                  label: 'My applications',
+                  index: 1,
+                ),
+              ],
+        secondaryItems: [
+          DrawerItem(
+            icon: Icons.logout,
+            label: 'Sign out',
+            badgeColor: StatusColors.rejected,
+            onTap: _logout,
           ),
         ],
       ),
+      body: pages[_index],
       floatingActionButton: isHr
           ? FloatingActionButton(
               onPressed: () => AgentChatSheet.show(
@@ -106,43 +177,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Icon(Icons.auto_awesome),
             )
           : null,
-      body: pages[_index],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() {
-          _index = i;
-          if (i != 2) {
-            _pendingJobId = null;
-            _pendingStatus = null;
-          }
-        }),
-        destinations: isHr
-            ? const [
-                NavigationDestination(
-                  icon: Icon(Icons.dashboard_outlined),
-                  selectedIcon: Icon(Icons.dashboard),
-                  label: 'Dashboard',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.work_outline),
-                  selectedIcon: Icon(Icons.work),
-                  label: 'Vacancies',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.people_outline),
-                  selectedIcon: Icon(Icons.people),
-                  label: 'Candidates',
-                ),
-              ]
-            : const [
-                NavigationDestination(icon: Icon(Icons.search), label: 'Jobs'),
-                NavigationDestination(
-                  icon: Icon(Icons.description_outlined),
-                  selectedIcon: Icon(Icons.description),
-                  label: 'Applications',
-                ),
-              ],
-      ),
     );
   }
 }
@@ -156,6 +190,7 @@ class _MyApplicationsTab extends StatefulWidget {
 
 class _MyApplicationsTabState extends State<_MyApplicationsTab> {
   List<Map<String, dynamic>> _apps = [];
+  List<Map<String, dynamic>> _tests = [];
   bool _loading = true;
 
   @override
@@ -166,9 +201,13 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
 
   Future<void> _load() async {
     final apps = await JobService.myApplications();
+    final tests = await AssessmentService.mine();
     if (!mounted) return;
     setState(() {
       _apps = apps;
+      // Anything still to sit goes above the application list — it is the
+      // one thing here with a deadline attached.
+      _tests = tests.where((t) => t['status'] != 'submitted').toList();
       _loading = false;
     });
   }
@@ -179,7 +218,7 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_apps.isEmpty) {
+    if (_apps.isEmpty && _tests.isEmpty) {
       return const _PlaceholderTab(
         icon: Icons.description_outlined,
         title: 'No applications yet',
@@ -189,10 +228,93 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
 
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(Space.lg),
-        itemCount: _apps.length,
-        itemBuilder: (context, i) => _ApplicationCard(app: _apps[i]),
+        children: [
+          for (final t in _tests) _PendingTestCard(test: t, onDone: _load),
+          for (final a in _apps) _ApplicationCard(app: a),
+        ],
+      ),
+    );
+  }
+}
+
+class _PendingTestCard extends StatelessWidget {
+  final Map<String, dynamic> test;
+  final VoidCallback onDone;
+
+  const _PendingTestCard({required this.test, required this.onDone});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final assessment = test['assessments'] as Map<String, dynamic>?;
+    final job = assessment?['jobs'] as Map<String, dynamic>?;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: Card(
+        // Outlined in the accent colour so it reads as an action, not
+        // another status card.
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          side: BorderSide(color: theme.colorScheme.primary),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(Space.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.quiz_outlined,
+                    size: 19,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: Space.sm),
+                  Text(
+                    'Assessment pending',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Space.md),
+              Text(
+                assessment?['title'] ?? 'Assessment',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: Space.xs),
+              Text(
+                '${job?['title'] ?? 'Role'} · '
+                '${assessment?['duration_min'] ?? 20} minutes',
+                style: TextStyle(fontSize: 13, color: theme.hintColor),
+              ),
+              const SizedBox(height: Space.lg),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton(
+                  onPressed: () async {
+                    final done = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            TakeTestScreen(attemptId: test['id'] as String),
+                      ),
+                    );
+                    if (done == true) onDone();
+                  },
+                  child: const Text('Start test'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -390,14 +512,14 @@ class _PlaceholderTab extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(Space.xxl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, size: 56, color: theme.hintColor),
-            const SizedBox(height: 16),
+            const SizedBox(height: Space.lg),
             Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
+            const SizedBox(height: Space.xs + 2),
             Text(
               message,
               textAlign: TextAlign.center,

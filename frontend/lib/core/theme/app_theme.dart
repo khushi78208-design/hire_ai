@@ -17,15 +17,28 @@ class AppRadius {
   static const pill = 999.0;
 }
 
+/// The dark shell behind the drawer. Both roles share the layout; only the
+/// tint separates them.
+class Shell {
+  static const hr = Color(0xFF1E1B4B); // indigo 950
+  static const candidate = Color(0xFF134E4A); // teal 900
+
+  static const onDark = Color(0xFFF5F5F7);
+  static const onDarkMuted = Color(0xFF9CA3C7);
+
+  static Color of(String? role) =>
+      (role == 'hr' || role == 'admin') ? hr : candidate;
+}
+
 /// Application status colours live here, not scattered across screens,
 /// so a status always looks the same wherever it appears.
 class StatusColors {
   static const applied = Color(0xFF64748B);
-  static const shortlisted = Color(0xFF15803D);
-  static const onHold = Color(0xFFB45309);
-  static const interview = Color(0xFF1D4ED8);
-  static const selected = Color(0xFF0F766E);
-  static const rejected = Color(0xFFB91C1C);
+  static const shortlisted = Color(0xFF059669);
+  static const onHold = Color(0xFFD97706);
+  static const interview = Color(0xFF4F46E5);
+  static const selected = Color(0xFF0D9488);
+  static const rejected = Color(0xFFDC2626);
 
   static Color of(String status) => switch (status) {
     'shortlisted' => shortlisted,
@@ -47,9 +60,9 @@ class StatusColors {
 }
 
 class ScoreColors {
-  static const strong = Color(0xFF15803D);
-  static const review = Color(0xFFB45309);
-  static const low = Color(0xFFB91C1C);
+  static const strong = Color(0xFF059669);
+  static const review = Color(0xFFD97706);
+  static const low = Color(0xFFDC2626);
 
   static Color of(int score) {
     if (score >= 80) return strong;
@@ -59,11 +72,13 @@ class ScoreColors {
 }
 
 class AppTheme {
-  // Candidates and recruiters get visibly different palettes. One glance
-  // should tell you which side of the product you are looking at.
-  static const _candidateSeed = Color(0xFF0D9488); // teal
-  static const _hrSeed = Color(0xFF1E3A5F); // deep navy
-  static const _neutralSeed = Color(0xFF334155);
+  static const _hrSeed = Color(0xFF4F46E5); // indigo 600
+  static const _candidateSeed = Color(0xFF0D9488); // teal 600
+  static const _neutralSeed = Color(0xFF52525B);
+
+  // Pure white makes cards disappear. A hair of warmth lets them sit on
+  // the page instead of merging into it.
+  static const _canvas = Color(0xFFFAFAFA);
 
   static ThemeData candidate() => _build(_candidateSeed);
   static ThemeData hr() => _build(_hrSeed);
@@ -78,10 +93,10 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+      scaffoldBackgroundColor: _canvas,
 
       appBarTheme: AppBarTheme(
-        backgroundColor: scheme.surface,
+        backgroundColor: _canvas,
         surfaceTintColor: Colors.transparent,
         foregroundColor: scheme.onSurface,
         elevation: 0,
@@ -91,7 +106,7 @@ class AppTheme {
           fontSize: 19,
           fontWeight: FontWeight.w600,
           color: scheme.onSurface,
-          letterSpacing: -0.2,
+          letterSpacing: -0.3,
         ),
       ),
 
@@ -99,7 +114,7 @@ class AppTheme {
       // and keep dense lists from looking noisy.
       cardTheme: CardThemeData(
         elevation: 0,
-        color: scheme.surface,
+        color: Colors.white,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
@@ -110,10 +125,10 @@ class AppTheme {
 
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: scheme.surface,
+        fillColor: Colors.white,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: Space.lg,
-          vertical: Space.md,
+          vertical: Space.md + 2,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.control),
@@ -134,7 +149,7 @@ class AppTheme {
         style: FilledButton.styleFrom(
           padding: const EdgeInsets.symmetric(
             horizontal: Space.xl,
-            vertical: Space.md + 2,
+            vertical: Space.md + 4,
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.control),
@@ -158,6 +173,7 @@ class AppTheme {
 
       chipTheme: ChipThemeData(
         side: BorderSide(color: scheme.outlineVariant),
+        backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.control),
         ),
@@ -166,7 +182,7 @@ class AppTheme {
       ),
 
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: scheme.surface,
+        backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         indicatorColor: scheme.primaryContainer,
         elevation: 0,
@@ -174,6 +190,15 @@ class AppTheme {
         labelTextStyle: WidgetStateProperty.all(
           const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
         ),
+      ),
+
+      // The drawer is the one dark surface in the app — it anchors the
+      // layout and makes the role obvious at a glance.
+      drawerTheme: const DrawerThemeData(
+        backgroundColor: Shell.hr,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        width: 280,
       ),
 
       dividerTheme: DividerThemeData(
@@ -190,6 +215,16 @@ class AppTheme {
       ),
 
       dialogTheme: DialogThemeData(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+      ),
+
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: scheme.primary,
+        foregroundColor: Colors.white,
+        elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.card),
         ),
@@ -200,14 +235,14 @@ class AppTheme {
         headlineSmall: TextStyle(
           fontSize: 24,
           fontWeight: FontWeight.w600,
-          letterSpacing: -0.4,
+          letterSpacing: -0.5,
         ),
         titleMedium: TextStyle(
           fontSize: 16,
           fontWeight: FontWeight.w600,
-          letterSpacing: -0.1,
+          letterSpacing: -0.2,
         ),
-        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        titleSmall: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
         bodyMedium: TextStyle(fontSize: 14, height: 1.5),
         bodySmall: TextStyle(fontSize: 12.5, height: 1.4),
         labelLarge: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),

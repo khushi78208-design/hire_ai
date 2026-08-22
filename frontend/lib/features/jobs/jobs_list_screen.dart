@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'job_service.dart';
 import 'job_detail_screen.dart';
-import 'create_job_screen.dart';
 
 class JobsListScreen extends StatefulWidget {
   final bool isHr;
@@ -77,19 +76,6 @@ class _JobsListScreenState extends State<JobsListScreen> {
           Expanded(child: _buildBody()),
         ],
       ),
-      floatingActionButton: widget.isHr
-          ? FloatingActionButton.extended(
-              onPressed: () async {
-                final created = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CreateJobScreen()),
-                );
-                if (created == true) _load();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('New vacancy'),
-            )
-          : null,
     );
   }
 
