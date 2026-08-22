@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import '../storage/token_storage.dart';
 
 class ApiClient {
@@ -8,21 +7,20 @@ class ApiClient {
 
   late final Dio dio;
 
-  static String get baseUrl {
-    // The browser talks to the backend on the same machine.
-    if (kIsWeb) return 'http://localhost:4000/api/v1';
-
-    // A physical device reaches the laptop by its LAN IP — localhost points
-    // at the phone itself, and 10.0.2.2 only works for the emulator.
-    return 'http://192.168.100.209:4000/api/v1';
-  }
+  /// The deployed backend. Same URL from every platform — no LAN IP, no
+  /// laptop, no emulator special-casing.
+  static const String baseUrl = 'https://hireai-api-e83c.onrender.com/api/v1';
 
   ApiClient._internal() {
     dio = Dio(
       BaseOptions(
         baseUrl: baseUrl,
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        // A free-tier instance spins down when idle and takes ~50s to wake,
+        // so the first request of a session needs real headroom.
+        connectTimeout: const Duration(seconds: 60),
+        // AI endpoints call an LLM and routinely run 30-60s on top of that.
+        receiveTimeout: const Duration(seconds: 120),
+        sendTimeout: const Duration(seconds: 60),
         headers: {'Content-Type': 'application/json'},
         // Let us handle 4xx ourselves instead of Dio throwing.
         validateStatus: (status) => status != null && status < 500,
