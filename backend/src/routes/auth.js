@@ -6,6 +6,8 @@ import { supabase } from "../config/supabase.js";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { requireAuth } from "../middleware/auth.js";
 import { ApiError } from "../utils/ApiError.js";
+import { aiClient } from "../services/aiClient.js";
+
 import {
     signAccessToken,
     generateRefreshToken,
@@ -51,6 +53,15 @@ async function issueSession(user, req) {
     });
 
     return { accessToken, refreshToken };
+}
+/**
+ * The AI service sleeps after 15 minutes of inactivity and takes ~50s to
+ * wake. Pinging it the moment a recruiter signs in means it is already
+ * awake by the time they reach anything that needs it. Fire-and-forget:
+ * a failed ping must never affect the login.
+ */
+function wakeAiService() {
+    aiClient.health().catch(() => { });
 }
 
 router.post(
@@ -126,6 +137,7 @@ router.post(
             .eq("id", user.id);
 
         const tokens = await issueSession(user, req);
+        if (user.role === "hr" || user.role === "admin") wakeAiService();
 
         res.json({ success: true, data: { user: publicUser(user), ...tokens } });
     })
