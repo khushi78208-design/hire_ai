@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../assessment/assessment_service.dart';
 import 'job_service.dart';
 import 'evaluation_model.dart';
 
@@ -25,6 +26,7 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   Job? _selected;
   List<Map<String, dynamic>> _applicants = [];
   Map<String, Evaluation> _evaluations = {};
+  Map<String, Map<String, dynamic>> _testResults = {};
   final Set<String> _analysing = {};
   bool _loadingJobs = true;
   bool _loadingApplicants = false;
@@ -55,8 +57,6 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
       }
     }
 
-    // Arriving from a status card with no job means the recruiter wants
-    // that status across every vacancy.
     final showAll = widget.initialJobId == null && widget.initialStatus != null;
 
     setState(() {
@@ -91,6 +91,7 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
         _loadingApplicants = false;
       });
       _loadEvaluations();
+      _loadTestResults();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -121,6 +122,27 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
     } catch (_) {
       // A missing evaluation is a normal state, not an error worth showing.
     }
+  }
+
+  Future<void> _loadTestResults() async {
+    final job = _selected;
+
+    // Results are fetched per vacancy, so the all-vacancies view skips them
+    // rather than firing one request per job.
+    if (job == null) {
+      setState(() => _testResults = {});
+      return;
+    }
+
+    final attempts = await AssessmentService.results(job.id);
+    if (!mounted) return;
+
+    setState(() {
+      _testResults = {
+        for (final a in attempts)
+          if (a['application_id'] != null) (a['application_id'] as String): a,
+      };
+    });
   }
 
   Future<void> _analyse(String applicationId) async {
@@ -301,6 +323,7 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
                     ? null
                     : _jobs.firstWhere((j) => j.id == id);
                 _evaluations = {};
+                _testResults = {};
               });
               _loadApplicants();
             },
@@ -405,6 +428,7 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
           return _ApplicantCard(
             app: app,
             evaluation: _evaluations[id],
+            testResult: _testResults[id],
             analysing: _analysing.contains(id),
             // Which vacancy an applicant belongs to is only ambiguous when
             // several are on screen at once.
@@ -469,6 +493,7 @@ class _FilterChip extends StatelessWidget {
 class _ApplicantCard extends StatefulWidget {
   final Map<String, dynamic> app;
   final Evaluation? evaluation;
+  final Map<String, dynamic>? testResult;
   final bool analysing;
   final bool showJobTitle;
   final void Function(String path) onOpenResume;
@@ -478,6 +503,7 @@ class _ApplicantCard extends StatefulWidget {
   const _ApplicantCard({
     required this.app,
     required this.evaluation,
+    required this.testResult,
     required this.analysing,
     required this.showJobTitle,
     required this.onOpenResume,
@@ -571,10 +597,10 @@ class _ApplicantCardState extends State<_ApplicantCard> {
                       ],
                     ),
                   ),
-                  if (eval != null)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (eval != null) ...[
                         Text(
                           '${eval.overallScore}',
                           style: TextStyle(
@@ -592,7 +618,12 @@ class _ApplicantCardState extends State<_ApplicantCard> {
                           ),
                         ),
                       ],
-                    ),
+                      if (widget.testResult != null) ...[
+                        const SizedBox(height: Space.xs),
+                        _TestChip(result: widget.testResult!),
+                      ],
+                    ],
+                  ),
                 ],
               ),
 
@@ -791,6 +822,59 @@ class _ApplicantCardState extends State<_ApplicantCard> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _TestChip extends StatelessWidget {
+  final Map<String, dynamic> result;
+
+  const _TestChip({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final done = result['status'] == 'submitted';
+
+    if (!done) {
+      return Text(
+        'Test pending',
+        style: TextStyle(fontSize: 11, color: theme.hintColor),
+      );
+    }
+
+    final score = result['score'] as int? ?? 0;
+    final total = result['total'] as int? ?? 1;
+    final pct = total == 0 ? 0 : (score / total * 100).round();
+    final switches = result['tab_switches'] as int? ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: ScoreColors.of(pct).withValues(alpha: 0.13),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            'Test $score/$total',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: ScoreColors.of(pct),
+            ),
+          ),
+        ),
+        // Surfaced only when it happened — a zero here would be noise.
+        if (switches > 0) ...[
+          const SizedBox(height: 2),
+          Text(
+            'left app ${switches}x',
+            style: TextStyle(fontSize: 10, color: theme.colorScheme.error),
+          ),
+        ],
+      ],
     );
   }
 }
