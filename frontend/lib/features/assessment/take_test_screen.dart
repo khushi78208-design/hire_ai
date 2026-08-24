@@ -126,17 +126,27 @@ class _TakeTestScreenState extends State<TakeTestScreen>
       return;
     }
 
-    Navigator.pop(context, true);
-    showDialog(
+    // The dialog has to finish before this screen pops — showing it
+    // afterwards attaches it to a context that no longer exists, which is
+    // why nothing appeared on submit.
+    await showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.check_circle_outline,
+          size: 40,
+          color: StatusColors.shortlisted,
+        ),
         title: const Text('Test submitted'),
         content: Text(
           auto
-              ? 'Time ran out and your answers were submitted. '
-                    'You scored $score out of $total.'
-              : 'You scored $score out of $total. '
-                    'The recruiter will be in touch.',
+              ? 'Time ran out and your answers were submitted automatically. '
+                    'You scored $score out of $total. The recruiter will '
+                    'review it and be in touch.'
+              : 'You scored $score out of $total. The recruiter will review '
+                    'it and be in touch.',
+          textAlign: TextAlign.center,
         ),
         actions: [
           FilledButton(
@@ -146,6 +156,9 @@ class _TakeTestScreenState extends State<TakeTestScreen>
         ],
       ),
     );
+
+    if (!mounted) return;
+    Navigator.pop(context, true);
   }
 
   String get _clock {

@@ -37,7 +37,7 @@ router.get(
         const { data, error } = await supabase
             .from("assessment_attempts")
             .select(
-                "id, status, score, total, submitted_at, " +
+                "id, application_id, status, score, total, submitted_at, " +
                 "assessments:assessment_id (id, title, duration_min, instructions, " +
                 "jobs:job_id (title))"
             )

@@ -49,10 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _role = role;
       _loading = false;
     });
-    // Repaint the whole app in this role's palette.
     HireAIApp.of(context)?.setRole(role);
 
-    // The drawer header needs a name; the token only carries the role.
     final name = await AuthService.currentName();
     if (mounted) setState(() => _name = name);
   }
@@ -190,7 +188,11 @@ class _MyApplicationsTab extends StatefulWidget {
 
 class _MyApplicationsTabState extends State<_MyApplicationsTab> {
   List<Map<String, dynamic>> _apps = [];
-  List<Map<String, dynamic>> _tests = [];
+
+  /// Keyed by application id so each card knows whether a test is part of
+  /// its pipeline, and whether it has been sat.
+  Map<String, Map<String, dynamic>> _testsByApp = {};
+
   bool _loading = true;
 
   @override
@@ -203,11 +205,13 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
     final apps = await JobService.myApplications();
     final tests = await AssessmentService.mine();
     if (!mounted) return;
+
     setState(() {
       _apps = apps;
-      // Anything still to sit goes above the application list — it is the
-      // one thing here with a deadline attached.
-      _tests = tests.where((t) => t['status'] != 'submitted').toList();
+      _testsByApp = {
+        for (final t in tests)
+          if (t['application_id'] != null) (t['application_id'] as String): t,
+      };
       _loading = false;
     });
   }
@@ -218,7 +222,7 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_apps.isEmpty && _tests.isEmpty) {
+    if (_apps.isEmpty) {
       return const _PlaceholderTab(
         icon: Icons.description_outlined,
         title: 'No applications yet',
@@ -226,13 +230,20 @@ class _MyApplicationsTabState extends State<_MyApplicationsTab> {
       );
     }
 
+    // A test still to sit is the only thing here with a clock on it, so it
+    // goes above the pipeline cards.
+    final pending = _testsByApp.values
+        .where((t) => t['status'] != 'submitted')
+        .toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(Space.lg),
         children: [
-          for (final t in _tests) _PendingTestCard(test: t, onDone: _load),
-          for (final a in _apps) _ApplicationCard(app: a),
+          for (final t in pending) _PendingTestCard(test: t, onDone: _load),
+          for (final a in _apps)
+            _ApplicationCard(app: a, test: _testsByApp[a['id']]),
         ],
       ),
     );
@@ -250,6 +261,7 @@ class _PendingTestCard extends StatelessWidget {
     final theme = Theme.of(context);
     final assessment = test['assessments'] as Map<String, dynamic>?;
     final job = assessment?['jobs'] as Map<String, dynamic>?;
+    final minutes = assessment?['duration_min'] ?? 20;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: Space.md),
@@ -290,10 +302,29 @@ class _PendingTestCard extends StatelessWidget {
               ),
               const SizedBox(height: Space.xs),
               Text(
-                '${job?['title'] ?? 'Role'} · '
-                '${assessment?['duration_min'] ?? 20} minutes',
+                '${job?['title'] ?? 'Role'} · $minutes minutes',
                 style: TextStyle(fontSize: 13, color: theme.hintColor),
               ),
+
+              const SizedBox(height: Space.md),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(Space.md),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer.withValues(
+                    alpha: 0.35,
+                  ),
+                  borderRadius: BorderRadius.circular(AppRadius.control),
+                ),
+                child: Text(
+                  'The recruiter has asked you to take this test as part of '
+                  'your application. You get one attempt, and the timer '
+                  'starts the moment you begin — open it when you have '
+                  '$minutes uninterrupted minutes.',
+                  style: const TextStyle(fontSize: 13, height: 1.5),
+                ),
+              ),
+
               const SizedBox(height: Space.lg),
               SizedBox(
                 width: double.infinity,
@@ -322,29 +353,48 @@ class _PendingTestCard extends StatelessWidget {
 
 class _ApplicationCard extends StatelessWidget {
   final Map<String, dynamic> app;
+  final Map<String, dynamic>? test;
 
-  const _ApplicationCard({required this.app});
+  const _ApplicationCard({required this.app, this.test});
 
-  /// Where this application sits on the pipeline. Rejected is off the
-  /// track entirely, so it returns -1 and the stepper is replaced.
-  int _stage(String status) => switch (status) {
-    'shortlisted' => 1,
-    'interview' => 2,
-    'selected' => 3,
-    'rejected' => -1,
-    _ => 0,
-  };
+  bool get _hasTest => test != null;
+  bool get _testDone => test?['status'] == 'submitted';
 
-  String _message(String status) => switch (status) {
-    'shortlisted' => 'Your profile was shortlisted. The team will be in touch.',
-    'on_hold' => 'Your application is under consideration.',
-    'interview' => 'You have moved to the interview stage.',
-    'selected' => 'Congratulations — you have been selected.',
-    'rejected' =>
-      'You were not selected for this role. Keep applying — this one '
-          'is not a reflection of your abilities.',
-    _ => 'Your application has been received.',
-  };
+  /// Where this application sits on the pipeline. An assessment only
+  /// becomes a stage once one has actually been sent, so the track stays
+  /// honest for applications that never had one.
+  int _stage(String status) {
+    if (status == 'rejected') return -1;
+    if (status == 'selected') return _hasTest ? 4 : 3;
+    if (status == 'interview') return _hasTest ? 3 : 2;
+    if (status == 'shortlisted') return _hasTest && _testDone ? 2 : 1;
+    return 0;
+  }
+
+  List<String> get _labels => _hasTest
+      ? const ['Applied', 'Shortlisted', 'Assessment', 'Interview', 'Result']
+      : const ['Applied', 'Shortlisted', 'Interview', 'Result'];
+
+  String _message(String status) {
+    if (status == 'shortlisted' && _hasTest) {
+      return _testDone
+          ? 'Assessment submitted. The recruiter is reviewing your result.'
+          : 'Your profile was shortlisted. Take the assessment above to '
+                'move forward.';
+    }
+
+    return switch (status) {
+      'shortlisted' =>
+        'Your profile was shortlisted. The team will be in touch.',
+      'on_hold' => 'Your application is under consideration.',
+      'interview' => 'You have moved to the interview stage.',
+      'selected' => 'Congratulations — you have been selected.',
+      'rejected' =>
+        'You were not selected for this role. Keep applying — this one '
+            'is not a reflection of your abilities.',
+      _ => 'Your application has been received.',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -405,7 +455,7 @@ class _ApplicationCard extends StatelessWidget {
               const SizedBox(height: Space.lg),
 
               if (stage >= 0)
-                _Stepper(stage: stage, color: color)
+                _Stepper(stage: stage, color: color, labels: _labels)
               else
                 Container(
                   width: double.infinity,
@@ -429,6 +479,39 @@ class _ApplicationCard extends StatelessWidget {
                   style: TextStyle(fontSize: 13, color: theme.hintColor),
                 ),
               ],
+
+              if (_testDone) ...[
+                const SizedBox(height: Space.md),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Space.md,
+                    vertical: Space.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: StatusColors.shortlisted.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(AppRadius.control),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        size: 17,
+                        color: StatusColors.shortlisted,
+                      ),
+                      const SizedBox(width: Space.sm),
+                      Text(
+                        'Assessment: ${test!['score']}/${test!['total']}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: StatusColors.shortlisted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -440,10 +523,13 @@ class _ApplicationCard extends StatelessWidget {
 class _Stepper extends StatelessWidget {
   final int stage;
   final Color color;
+  final List<String> labels;
 
-  const _Stepper({required this.stage, required this.color});
-
-  static const _labels = ['Applied', 'Shortlisted', 'Interview', 'Result'];
+  const _Stepper({
+    required this.stage,
+    required this.color,
+    required this.labels,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -452,7 +538,7 @@ class _Stepper extends StatelessWidget {
 
     return Row(
       children: [
-        for (var i = 0; i < _labels.length; i++) ...[
+        for (var i = 0; i < labels.length; i++) ...[
           Column(
             children: [
               Container(
@@ -471,17 +557,21 @@ class _Stepper extends StatelessWidget {
                     : null,
               ),
               const SizedBox(height: Space.xs),
-              Text(
-                _labels[i],
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: i <= stage ? color : theme.hintColor,
-                  fontWeight: i == stage ? FontWeight.w600 : null,
+              SizedBox(
+                width: 62,
+                child: Text(
+                  labels[i],
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: i <= stage ? color : theme.hintColor,
+                    fontWeight: i == stage ? FontWeight.w600 : null,
+                  ),
                 ),
               ),
             ],
           ),
-          if (i < _labels.length - 1)
+          if (i < labels.length - 1)
             Expanded(
               child: Container(
                 height: 2,
