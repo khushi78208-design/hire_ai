@@ -32,9 +32,19 @@ async function call(path, { method = "POST", body, timeoutMs } = {}) {
   try {
     payload = text ? JSON.parse(text) : {};
   } catch {
-    throw new ApiError(502, "AI service returned a non-JSON response");
-  }
+    // A sleeping free instance returns Render's HTML holding page, not
+    // JSON. Say so plainly instead of blaming the response format.
+    const waking = response.statusCode >= 500 || text.includes("<html");
+    console.error("[aiClient] non-JSON from", path, response.statusCode,
+      text.slice(0, 300));
 
+    throw new ApiError(
+      503,
+      waking
+        ? "The AI service is starting up. Try again in a few seconds."
+        : "AI service returned an unexpected response"
+    );
+  }
   if (response.statusCode >= 400) {
     const detail = payload?.detail;
     const message =
