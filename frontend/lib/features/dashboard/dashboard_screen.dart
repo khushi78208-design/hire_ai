@@ -58,6 +58,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -67,7 +69,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off, size: 48, color: Theme.of(context).hintColor),
+            Icon(Icons.cloud_off, size: 48, color: theme.hintColor),
             const SizedBox(height: Space.lg),
             Text(_error!),
             const SizedBox(height: Space.lg),
@@ -81,49 +83,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final jobs = (_data!['jobs'] as List).cast<Map<String, dynamic>>();
     final unanalysed = _data!['unanalysed'] as int;
     final stale = _data!['stale'] as int;
-    final onHold = totals['on_hold'] as int;
+
+    final openJobs = jobs.where((j) => j['status'] == 'open').length;
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(Space.lg),
         children: [
+          Text('Your pipeline', style: theme.textTheme.titleMedium),
+          const SizedBox(height: Space.xs),
+          Text(
+            'Tap any number to open that list.',
+            style: TextStyle(fontSize: 13, color: theme.hintColor),
+          ),
+          const SizedBox(height: Space.lg),
+
+          // Four numbers, fixed height. A per-vacancy breakdown here would
+          // grow without bound and mostly show zeroes.
           GridView.count(
-            crossAxisCount: MediaQuery.of(context).size.width > 600 ? 5 : 2,
+            crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: Space.md,
             mainAxisSpacing: Space.md,
-            childAspectRatio: 1.6,
+            childAspectRatio: 1.5,
             children: [
               _Metric(
-                label: 'Applications',
-                value: totals['applications'],
+                icon: Icons.work_outline,
+                label: 'Open vacancies',
+                value: openJobs,
+                color: theme.colorScheme.primary,
                 onTap: () => widget.onDrillDown?.call(null, null),
               ),
               _Metric(
+                icon: Icons.inbox_outlined,
+                label: 'Applications',
+                value: totals['applications'],
+                color: StatusColors.applied,
+                onTap: () => widget.onDrillDown?.call(null, 'applied'),
+              ),
+              _Metric(
+                icon: Icons.pending_outlined,
                 label: 'Not reviewed',
                 value: totals['applied'],
                 color: StatusColors.onHold,
                 onTap: () => widget.onDrillDown?.call(null, 'applied'),
               ),
               _Metric(
+                icon: Icons.check_circle_outline,
                 label: 'Shortlisted',
                 value: totals['shortlisted'],
                 color: StatusColors.shortlisted,
                 onTap: () => widget.onDrillDown?.call(null, 'shortlisted'),
-              ),
-              _Metric(
-                label: 'Interview',
-                value: totals['interview'],
-                color: StatusColors.interview,
-                onTap: () => widget.onDrillDown?.call(null, 'interview'),
-              ),
-              _Metric(
-                label: 'Selected',
-                value: totals['selected'],
-                color: StatusColors.selected,
-                onTap: () => widget.onDrillDown?.call(null, 'selected'),
               ),
             ],
           ),
@@ -132,12 +144,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           // The point of a dashboard is not to show numbers, it is to say
           // what to do next.
-          if (unanalysed > 0 || stale > 0 || onHold > 0) ...[
-            Text(
-              'Needs your attention',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: Space.md),
+          Text('Needs your attention', style: theme.textTheme.titleMedium),
+          const SizedBox(height: Space.md),
+
+          if (unanalysed == 0 && stale == 0 && totals['on_hold'] == 0)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(Space.xl),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      size: 22,
+                      color: StatusColors.shortlisted,
+                    ),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Text(
+                        totals['applications'] == 0
+                            ? 'No applications yet. They will show up here '
+                                  'as they arrive.'
+                            : 'Nothing waiting on you right now.',
+                        style: const TextStyle(fontSize: 14, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
             Card(
               child: Column(
                 children: [
@@ -162,12 +197,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           widget.onDrillDown?.call(null, 'shortlisted'),
                       first: unanalysed == 0,
                     ),
-                  if (onHold > 0)
+                  if (totals['on_hold'] > 0)
                     _AttentionRow(
                       icon: Icons.pause_circle_outline,
                       color: StatusColors.applied,
                       text:
-                          '$onHold candidate${onHold == 1 ? "" : "s"} on hold',
+                          '${totals['on_hold']} candidate${totals['on_hold'] == 1 ? "" : "s"} '
+                          'on hold',
                       action: 'View',
                       onTap: () => widget.onDrillDown?.call(null, 'on_hold'),
                       first: unanalysed == 0 && stale == 0,
@@ -175,39 +211,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: Space.xl),
-          ],
 
-          Text('By vacancy', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: Space.md),
+          const SizedBox(height: Space.xl),
 
-          if (jobs.isEmpty)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(Space.xl),
-                child: Center(
-                  child: Text(
-                    'No vacancies yet',
-                    style: TextStyle(color: Theme.of(context).hintColor),
-                  ),
-                ),
-              ),
-            )
-          else
-            Card(
-              child: Column(
+          // Later stages matter less day to day, so they sit as a quiet
+          // summary rather than four more cards.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(Space.lg),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  for (var i = 0; i < jobs.length; i++)
-                    _JobRow(
-                      job: jobs[i],
-                      first: i == 0,
-                      onDrillDown: widget.onDrillDown,
-                    ),
+                  _MiniStat(
+                    label: 'Interview',
+                    value: totals['interview'],
+                    color: StatusColors.interview,
+                    onTap: () => widget.onDrillDown?.call(null, 'interview'),
+                  ),
+                  _Divider(),
+                  _MiniStat(
+                    label: 'Selected',
+                    value: totals['selected'],
+                    color: StatusColors.selected,
+                    onTap: () => widget.onDrillDown?.call(null, 'selected'),
+                  ),
+                  _Divider(),
+                  _MiniStat(
+                    label: 'Rejected',
+                    value: totals['rejected'],
+                    color: StatusColors.rejected,
+                    onTap: () => widget.onDrillDown?.call(null, 'rejected'),
+                  ),
                 ],
               ),
             ),
+          ),
 
-          const SizedBox(height: Space.xl),
+          const SizedBox(height: Space.xxl),
         ],
       ),
     );
@@ -215,15 +255,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 class _Metric extends StatelessWidget {
+  final IconData icon;
   final String label;
   final dynamic value;
-  final Color? color;
+  final Color color;
   final VoidCallback? onTap;
 
   const _Metric({
+    required this.icon,
     required this.label,
     required this.value,
-    this.color,
+    required this.color,
     this.onTap,
   });
 
@@ -233,32 +275,43 @@ class _Metric extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.control),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         padding: const EdgeInsets.all(Space.lg),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.45,
-          ),
-          borderRadius: BorderRadius.circular(AppRadius.control),
+          color: Colors.white,
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              label,
-              style: TextStyle(fontSize: 12.5, color: theme.hintColor),
-            ),
-            const SizedBox(height: Space.xs),
-            Text(
-              '$value',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w600,
-                height: 1,
-                color: color ?? theme.colorScheme.onSurface,
+            Container(
+              padding: const EdgeInsets.all(Space.sm),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: Icon(icon, size: 18, color: color),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$value',
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 12.5, color: theme.hintColor),
+                ),
+              ],
             ),
           ],
         ),
@@ -310,95 +363,59 @@ class _AttentionRow extends StatelessWidget {
   }
 }
 
-class _JobRow extends StatelessWidget {
-  final Map<String, dynamic> job;
-  final bool first;
-  final void Function(String? jobId, String? status)? onDrillDown;
+class _MiniStat extends StatelessWidget {
+  final String label;
+  final dynamic value;
+  final Color color;
+  final VoidCallback? onTap;
 
-  const _JobRow({
-    required this.job,
-    required this.first,
-    required this.onDrillDown,
+  const _MiniStat({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final id = job['id'] as String;
 
-    final chips = <(String, int, Color)>[
-      ('new', job['applied'] ?? 0, StatusColors.applied),
-      ('shortlisted', job['shortlisted'] ?? 0, StatusColors.shortlisted),
-      ('on hold', job['on_hold'] ?? 0, StatusColors.onHold),
-      ('interview', job['interview'] ?? 0, StatusColors.interview),
-      ('selected', job['selected'] ?? 0, StatusColors.selected),
-      ('rejected', job['rejected'] ?? 0, StatusColors.rejected),
-    ].where((c) => c.$2 > 0).toList();
-
-    const statusKeys = {
-      'new': 'applied',
-      'shortlisted': 'shortlisted',
-      'on hold': 'on_hold',
-      'interview': 'interview',
-      'selected': 'selected',
-      'rejected': 'rejected',
-    };
-
-    return Container(
-      decoration: BoxDecoration(
-        border: first
-            ? null
-            : Border(top: BorderSide(color: theme.dividerColor)),
-      ),
-      padding: const EdgeInsets.all(Space.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.sm),
+          child: Column(
             children: [
-              Expanded(
-                child: Text(
-                  job['title'] ?? 'Vacancy',
-                  style: theme.textTheme.titleSmall,
+              Text(
+                '$value',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: color,
                 ),
               ),
+              const SizedBox(height: 2),
               Text(
-                '${job['total'] ?? 0} applied',
-                style: TextStyle(fontSize: 13, color: theme.hintColor),
+                label,
+                style: TextStyle(fontSize: 12, color: theme.hintColor),
               ),
             ],
           ),
-          if (chips.isNotEmpty) ...[
-            const SizedBox(height: Space.sm),
-            Wrap(
-              spacing: Space.sm,
-              runSpacing: Space.sm,
-              children: chips
-                  .map(
-                    (c) => InkWell(
-                      onTap: () => onDrillDown?.call(id, statusKeys[c.$1]),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: c.$3.withValues(alpha: 0.13),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '${c.$2} ${c.$1}',
-                          style: TextStyle(fontSize: 12, color: c.$3),
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _Divider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 34,
+      color: Theme.of(context).dividerColor,
     );
   }
 }

@@ -5,6 +5,7 @@ import { supabase } from "../config/supabase.js";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { ApiError } from "../utils/ApiError.js";
+import { notify } from "../services/notify.js";
 
 const router = Router();
 
@@ -41,6 +42,11 @@ router.post(
             .single();
 
         if (error) throw ApiError.internal(`Could not create job: ${error.message}`);
+
+        // A job created straight as "open" is published in one step.
+        if (data.status === "open") {
+            notify.newVacancy(data);
+        }
 
         res.status(201).json({ success: true, data: { job: data } });
     })
@@ -118,7 +124,7 @@ router.patch(
 
         const { data: job } = await supabase
             .from("jobs")
-            .select("created_by")
+            .select("created_by, status")
             .eq("id", req.params.id)
             .maybeSingle();
 
@@ -135,6 +141,11 @@ router.patch(
             .single();
 
         if (error) throw ApiError.internal(error.message);
+
+        // Fires when a draft becomes public, not on every edit of a live job.
+        if (body.status === "open" && job.status !== "open") {
+            notify.newVacancy(data);
+        }
 
         res.json({ success: true, data: { job: data } });
     })
@@ -163,7 +174,7 @@ router.post(
 
         const { data: job } = await supabase
             .from("jobs")
-            .select("id, status")
+            .select("id, status, title, created_by")
             .eq("id", req.params.id)
             .maybeSingle();
 
@@ -200,6 +211,8 @@ router.post(
 
         if (error) throw ApiError.internal(error.message);
 
+        notify.newApplication({ job, applicantName: body.full_name });
+
         res.status(201).json({ success: true, data: { application: data } });
     })
 );
@@ -232,6 +245,7 @@ router.get(
         res.json({ success: true, data: { applications: data ?? [] } });
     })
 );
+
 // DELETE /api/v1/jobs/:id  (HR, own jobs only)
 router.delete(
     "/:id",

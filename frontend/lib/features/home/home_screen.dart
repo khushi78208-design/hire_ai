@@ -12,6 +12,7 @@ import '../jobs/applicants_screen.dart';
 import '../jobs/create_job_screen.dart';
 import '../jobs/job_service.dart';
 import '../jobs/jobs_list_screen.dart';
+import '../../core/widgets/notification_bell.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -100,8 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(titles[_index]),
         actions: [
-          // Lives here rather than as a second FAB — two floating buttons
-          // in one corner collide.
+          const NotificationBell(),
           if (isHr && _index == 1)
             IconButton(
               icon: const Icon(Icons.add),

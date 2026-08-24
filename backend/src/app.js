@@ -9,12 +9,14 @@ import analysisRouter from "./routes/analysis.js";
 import agentRouter from "./routes/agent.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import assessmentsRouter from "./routes/assessments.js";
+import notificationsRouter from "./routes/notifications.js";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 
 // Routes
 app.use("/api/v1", healthRouter);
@@ -25,6 +27,7 @@ app.use("/api/v1/upload", uploadRouter);
 app.use("/api/v1/analysis", analysisRouter);
 app.use("/api/v1/agent", agentRouter);
 app.use("/api/v1/assessments", assessmentsRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 // 404 & Error Handler
 app.use(notFoundHandler);
