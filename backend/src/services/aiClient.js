@@ -32,16 +32,21 @@ async function call(path, { method = "POST", body, timeoutMs } = {}) {
   try {
     payload = text ? JSON.parse(text) : {};
   } catch {
-    // A sleeping free instance answers with Render's HTML holding page
-    // rather than JSON. Name the real cause instead of the symptom.
-    const waking = response.statusCode >= 500 || text.includes("<html");
-    console.error(
-      "[aiClient] non-JSON from",
-      path,
-      response.statusCode,
-      text.slice(0, 300)
-    );
+    // Anything that is not JSON came from the platform, not the service —
+    // a holding page while it boots, or a rate-limit notice.
+    const status = response.statusCode;
+    console.error("[aiClient] non-JSON from", path, status, text.slice(0, 300));
 
+    // Retrying a 429 only deepens the hole, so it must not be mistaken
+    // for a cold start.
+    if (status === 429) {
+      throw new ApiError(
+        429,
+        "Too many AI requests just now. Wait a minute and try again."
+      );
+    }
+
+    const waking = status >= 500 || text.includes("<html");
     throw new ApiError(
       waking ? 503 : 502,
       waking
@@ -68,6 +73,9 @@ async function call(path, { method = "POST", body, timeoutMs } = {}) {
  * A sleeping free instance answers with a 502 page for the first ~50
  * seconds while it boots. Two patient retries turn that from a visible
  * failure into a merely slow response.
+ *
+ * Only 503 is retried. A 429 fails immediately — repeating it is what
+ * caused the rate limit in the first place.
  */
 async function callWithWake(path, options) {
   for (let attempt = 0; attempt < 3; attempt++) {

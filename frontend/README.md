@@ -7,8 +7,6 @@ requirements — returning a score with the reasoning behind it.
 **AI screens, ranks and explains. The recruiter decides.** Nothing is
 auto-rejected and no hiring action happens without a human pressing the button.
 
----
-
 ## Features
 
 **Candidates** — browse and search vacancies, apply with a resume, sit a timed
@@ -26,6 +24,5 @@ and one-tap movement through shortlist → hold → interview → selected/rejec
 | Assistant | Drafts a vacancy from a plain-language description, answers questions about the pipeline | Recruiter edits, then creates as draft |
 | Assessments | Writes multiple-choice questions from the vacancy's skills | Recruiter reviews every question before sending |
 
----
 
 ## Architecture
