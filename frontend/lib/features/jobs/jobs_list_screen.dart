@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/animations.dart';
 import 'job_service.dart';
 import 'job_detail_screen.dart';
 
@@ -56,19 +58,22 @@ class _JobsListScreenState extends State<JobsListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.fromLTRB(
+              Space.lg,
+              Space.md,
+              Space.lg,
+              Space.sm,
+            ),
             child: TextField(
               controller: _searchCtrl,
               onSubmitted: (_) => _load(),
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 hintText: 'Search job titles',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                prefixIcon: Icon(Icons.search),
                 isDense: true,
               ),
             ),
@@ -80,8 +85,18 @@ class _JobsListScreenState extends State<JobsListScreen> {
   }
 
   Widget _buildBody() {
+    // Skeletons rather than a spinner: a cold start can take most of a
+    // minute, and a blank screen for that long reads as broken.
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+          Space.lg,
+          Space.xs,
+          Space.lg,
+          Space.xl,
+        ),
+        children: const [SkeletonCard(), SkeletonCard(), SkeletonCard()],
+      );
     }
 
     if (_error != null) {
@@ -107,20 +122,27 @@ class _JobsListScreenState extends State<JobsListScreen> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
+        padding: const EdgeInsets.fromLTRB(
+          Space.lg,
+          Space.xs,
+          Space.lg,
+          Space.xxl + Space.xl,
+        ),
         itemCount: _jobs.length,
-        itemBuilder: (context, i) => _JobCard(
-          job: _jobs[i],
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    JobDetailScreen(jobId: _jobs[i].id, isHr: widget.isHr),
-              ),
-            );
-            _load();
-          },
+        itemBuilder: (context, i) => FadeInItem(
+          index: i,
+          child: _JobCard(
+            job: _jobs[i],
+            onTap: () async {
+              await Navigator.push(
+                context,
+                slideRoute(
+                  JobDetailScreen(jobId: _jobs[i].id, isHr: widget.isHr),
+                ),
+              );
+              _load();
+            },
+          ),
         ),
       ),
     );
@@ -137,96 +159,95 @@ class _JobCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.dividerColor),
-      ),
-      child: InkWell(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: PressableCard(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      job.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(Space.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        job.title,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                    if (job.status != 'open') _StatusChip(status: job.status),
+                  ],
+                ),
+                const SizedBox(height: Space.xs + 2),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.place_outlined,
+                      size: 15,
+                      color: theme.hintColor,
+                    ),
+                    const SizedBox(width: Space.xs),
+                    Text(
+                      job.location ?? 'Remote',
+                      style: TextStyle(color: theme.hintColor, fontSize: 13),
+                    ),
+                    const SizedBox(width: Space.md),
+                    Icon(Icons.schedule, size: 15, color: theme.hintColor),
+                    const SizedBox(width: Space.xs),
+                    Text(
+                      job.typeLabel,
+                      style: TextStyle(color: theme.hintColor, fontSize: 13),
+                    ),
+                  ],
+                ),
+                if (job.skills.isNotEmpty) ...[
+                  const SizedBox(height: Space.md),
+                  Wrap(
+                    spacing: Space.xs + 2,
+                    runSpacing: Space.xs + 2,
+                    children: job.skills.take(4).map((s) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+                const SizedBox(height: Space.md),
+                Row(
+                  children: [
+                    Text(
+                      '₹ ${job.salaryLabel}',
+                      style: const TextStyle(
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  if (job.status != 'open') _StatusChip(status: job.status),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(Icons.place_outlined, size: 15, color: theme.hintColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    job.location ?? 'Remote',
-                    style: TextStyle(color: theme.hintColor, fontSize: 13),
-                  ),
-                  const SizedBox(width: 12),
-                  Icon(Icons.schedule, size: 15, color: theme.hintColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    job.typeLabel,
-                    style: TextStyle(color: theme.hintColor, fontSize: 13),
-                  ),
-                ],
-              ),
-              if (job.skills.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: job.skills.take(4).map((s) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        s,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                    const Spacer(),
+                    Text(
+                      '${job.experienceMin}+ yrs',
+                      style: TextStyle(fontSize: 13, color: theme.hintColor),
+                    ),
+                  ],
                 ),
               ],
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Text(
-                    '₹ ${job.salaryLabel}',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${job.experienceMin}+ yrs',
-                    style: TextStyle(fontSize: 13, color: theme.hintColor),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -241,10 +262,10 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDraft = status == 'draft';
-    final color = isDraft ? Colors.orange : Colors.grey;
+    final color = isDraft ? StatusColors.onHold : StatusColors.applied;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(6),
@@ -253,7 +274,7 @@ class _StatusChip extends StatelessWidget {
         status.toUpperCase(),
         style: TextStyle(
           fontSize: 11,
-          color: color.shade800,
+          color: color,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -282,21 +303,30 @@ class _EmptyState extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(Space.xxl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 56, color: theme.hintColor),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(Space.xl),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.35,
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 40, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: Space.lg),
             Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
+            const SizedBox(height: Space.xs + 2),
             Text(
               message,
               textAlign: TextAlign.center,
               style: TextStyle(color: theme.hintColor),
             ),
             if (actionLabel != null) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: Space.xl),
               OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
             ],
           ],

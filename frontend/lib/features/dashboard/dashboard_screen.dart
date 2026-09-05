@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/animations.dart';
 
 class DashboardScreen extends StatefulWidget {
   /// Lets the dashboard hand the recruiter straight to a filtered list.
@@ -61,7 +62,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final theme = Theme.of(context);
 
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: const EdgeInsets.all(Space.lg),
+        children: const [SkeletonCard(), SkeletonCard()],
+      );
     }
 
     if (_error != null) {
@@ -272,15 +276,25 @@ class _Metric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final count = value is int ? value as int : 0;
 
-    return InkWell(
+    return PressableCard(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         padding: const EdgeInsets.all(Space.lg),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+          // A wash of the metric's own colour instead of white on white —
+          // four identical cards read as one grey block.
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              color.withValues(alpha: 0.11),
+              color.withValues(alpha: 0.04),
+            ],
+          ),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
           borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Column(
@@ -290,26 +304,38 @@ class _Metric extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(Space.sm),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
+                color: color,
+                borderRadius: BorderRadius.circular(9),
               ),
-              child: Icon(icon, size: 18, color: color),
+              child: Icon(icon, size: 17, color: Colors.white),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '$value',
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                    height: 1,
+                // Counting up gives the dashboard a moment of life on open.
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: count.toDouble()),
+                  duration: const Duration(milliseconds: 750),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, v, _) => Text(
+                    '${v.round()}',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                      letterSpacing: -0.5,
+                      color: color,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   label,
-                  style: TextStyle(fontSize: 12.5, color: theme.hintColor),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

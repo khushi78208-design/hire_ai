@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/animations.dart';
 import '../assessment/assessment_service.dart';
 import 'job_service.dart';
 import 'evaluation_model.dart';
@@ -277,7 +278,10 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loadingJobs) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: const EdgeInsets.all(Space.lg),
+        children: const [SkeletonCard(), SkeletonCard(), SkeletonCard()],
+      );
     }
 
     if (_jobs.isEmpty) {
@@ -372,8 +376,18 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
   }
 
   Widget _buildList() {
+    // Skeletons rather than a spinner: a cold start can take most of a
+    // minute, and a blank screen for that long reads as broken.
     if (_loadingApplicants) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+          Space.lg,
+          Space.xs,
+          Space.lg,
+          Space.xl,
+        ),
+        children: const [SkeletonCard(), SkeletonCard(), SkeletonCard()],
+      );
     }
 
     var list = [..._applicants];
@@ -425,17 +439,20 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
         itemBuilder: (context, i) {
           final app = list[i];
           final id = app['id'] as String;
-          return _ApplicantCard(
-            app: app,
-            evaluation: _evaluations[id],
-            testResult: _testResults[id],
-            analysing: _analysing.contains(id),
-            // Which vacancy an applicant belongs to is only ambiguous when
-            // several are on screen at once.
-            showJobTitle: _allJobs,
-            onOpenResume: _openResume,
-            onAnalyse: () => _analyse(id),
-            onSetStatus: (status) => _setStatus(id, status),
+          return FadeInItem(
+            index: i,
+            child: _ApplicantCard(
+              app: app,
+              evaluation: _evaluations[id],
+              testResult: _testResults[id],
+              analysing: _analysing.contains(id),
+              // Which vacancy an applicant belongs to is only ambiguous when
+              // several are on screen at once.
+              showJobTitle: _allJobs,
+              onOpenResume: _openResume,
+              onAnalyse: () => _analyse(id),
+              onSetStatus: (status) => _setStatus(id, status),
+            ),
           );
         },
       ),
@@ -466,7 +483,9 @@ class _FilterChip extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadius.pill),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(
             horizontal: Space.md + 2,
             vertical: Space.sm,
@@ -600,16 +619,14 @@ class _ApplicantCardState extends State<_ApplicantCard> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      // The score is the first thing a recruiter looks at,
+                      // so it earns the ring and the count-up.
                       if (eval != null) ...[
-                        Text(
-                          '${eval.overallScore}',
-                          style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w600,
-                            height: 1,
-                            color: ScoreColors.of(eval.overallScore),
-                          ),
+                        AnimatedScoreRing(
+                          score: eval.overallScore,
+                          color: ScoreColors.of(eval.overallScore),
                         ),
+                        const SizedBox(height: Space.xs),
                         Text(
                           eval.label,
                           style: TextStyle(
@@ -675,58 +692,75 @@ class _ApplicantCardState extends State<_ApplicantCard> {
                 ),
               ],
 
-              if (eval != null && _expanded) ...[
-                const SizedBox(height: Space.lg),
-                _Bars(eval: eval),
-                const SizedBox(height: Space.lg),
-                if (eval.matchedSkills.isNotEmpty)
-                  _SkillGroup(
-                    title: 'Matched',
-                    skills: eval.matchedSkills,
-                    color: StatusColors.shortlisted,
-                  ),
-                if (eval.missingSkills.isNotEmpty) ...[
-                  const SizedBox(height: Space.md),
-                  _SkillGroup(
-                    title: 'Missing',
-                    skills: eval.missingSkills,
-                    color: theme.colorScheme.error,
-                  ),
-                ],
-                if (eval.strengths.isNotEmpty) ...[
-                  const SizedBox(height: Space.md),
-                  _Points(title: 'Strengths', items: eval.strengths),
-                ],
-                if (eval.concerns.isNotEmpty) ...[
-                  const SizedBox(height: Space.md),
-                  _Points(title: 'Concerns', items: eval.concerns),
-                ],
-                if (eval.locationNote.isNotEmpty) ...[
-                  const SizedBox(height: Space.md),
-                  _Row(icon: Icons.place_outlined, text: eval.locationNote),
-                ],
-                const SizedBox(height: Space.md),
-                Text(
-                  'AI screening is a recommendation. The hiring decision is yours.',
-                  style: TextStyle(fontSize: 11, color: theme.hintColor),
-                ),
-              ],
+              // AnimatedSize keeps the expand from snapping open.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (eval != null && _expanded) ...[
+                      const SizedBox(height: Space.lg),
+                      _Bars(eval: eval),
+                      const SizedBox(height: Space.lg),
+                      if (eval.matchedSkills.isNotEmpty)
+                        _SkillGroup(
+                          title: 'Matched',
+                          skills: eval.matchedSkills,
+                          color: StatusColors.shortlisted,
+                        ),
+                      if (eval.missingSkills.isNotEmpty) ...[
+                        const SizedBox(height: Space.md),
+                        _SkillGroup(
+                          title: 'Missing',
+                          skills: eval.missingSkills,
+                          color: theme.colorScheme.error,
+                        ),
+                      ],
+                      if (eval.strengths.isNotEmpty) ...[
+                        const SizedBox(height: Space.md),
+                        _Points(title: 'Strengths', items: eval.strengths),
+                      ],
+                      if (eval.concerns.isNotEmpty) ...[
+                        const SizedBox(height: Space.md),
+                        _Points(title: 'Concerns', items: eval.concerns),
+                      ],
+                      if (eval.locationNote.isNotEmpty) ...[
+                        const SizedBox(height: Space.md),
+                        _Row(
+                          icon: Icons.place_outlined,
+                          text: eval.locationNote,
+                        ),
+                      ],
+                      const SizedBox(height: Space.md),
+                      Text(
+                        'AI screening is a recommendation. The hiring '
+                        'decision is yours.',
+                        style: TextStyle(fontSize: 11, color: theme.hintColor),
+                      ),
+                    ],
 
-              if (note != null && note.isNotEmpty && _expanded) ...[
-                const SizedBox(height: Space.md),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(Space.md),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: theme.dividerColor),
-                    borderRadius: BorderRadius.circular(AppRadius.control),
-                  ),
-                  child: Text(
-                    note,
-                    style: const TextStyle(fontSize: 13, height: 1.5),
-                  ),
+                    if (note != null && note.isNotEmpty && _expanded) ...[
+                      const SizedBox(height: Space.md),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(Space.md),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: theme.dividerColor),
+                          borderRadius: BorderRadius.circular(
+                            AppRadius.control,
+                          ),
+                        ),
+                        child: Text(
+                          note,
+                          style: const TextStyle(fontSize: 13, height: 1.5),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
+              ),
 
               const SizedBox(height: Space.md),
               Wrap(
@@ -896,10 +930,11 @@ class _ActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return PressableCard(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.control),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(
           horizontal: Space.md,
           vertical: Space.sm,
@@ -939,7 +974,8 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = StatusColors.of(status);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
       padding: const EdgeInsets.symmetric(
         horizontal: Space.md,
         vertical: Space.xs,
@@ -992,11 +1028,18 @@ class _Bars extends StatelessWidget {
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    value: e.$2 / 100,
-                    minHeight: 6,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    valueColor: AlwaysStoppedAnimation(color),
+                  // Bars grow into place when the detail panel opens.
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: e.$2 / 100),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, v, _) => LinearProgressIndicator(
+                      value: v,
+                      minHeight: 6,
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                      valueColor: AlwaysStoppedAnimation(color),
+                    ),
                   ),
                 ),
               ),
